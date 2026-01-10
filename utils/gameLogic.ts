@@ -239,48 +239,44 @@ export const mergePiece = (grid: GridCell[][], piece: ActivePiece): GridCell[][]
   return updateGroups(newGrid);
 };
 
-export const getFloatingBlocks = (grid: GridCell[][]): { grid: GridCell[][], falling: FallingBlock[] } => {
+export const getFloatingBlocks = (grid: GridCell[][], columnsToCheck?: number[]): { grid: GridCell[][], falling: FallingBlock[] } => {
     const newGrid = grid.map(row => [...row]);
     const falling: FallingBlock[] = [];
-    const isSupported = new Set<string>();
     
-    let changed = true;
-    while (changed) {
-        changed = false;
-        // Scan bottom-up
+    // We process specified columns or all columns if none specified.
+    // Gravity is strictly vertical, so columns are independent.
+    const cols = columnsToCheck ? columnsToCheck : Array.from({length: TOTAL_WIDTH}, (_, i) => i);
+
+    for (const x of cols) {
+        const supportedY = new Set<number>();
+        
+        // 1. Mark supported blocks from bottom up
         for (let y = TOTAL_HEIGHT - 1; y >= 0; y--) {
-            for (let x = 0; x < TOTAL_WIDTH; x++) {
-                if (newGrid[y][x]) {
-                    const key = `${x},${y}`;
-                    if (isSupported.has(key)) continue;
-                    
-                    let supported = false;
-                    // 1. Floor support
-                    if (y === TOTAL_HEIGHT - 1) {
-                        supported = true;
-                    } 
-                    // 2. Block below support
-                    else {
-                        const below = newGrid[y+1][x];
-                        // Must be occupied AND supported
-                        if (below && isSupported.has(`${x},${y+1}`)) {
-                           supported = true;
-                        }
+            if (newGrid[y][x]) {
+                let isSupported = false;
+                
+                // Floor support
+                if (y === TOTAL_HEIGHT - 1) {
+                    isSupported = true;
+                } 
+                // Stack support (check block below)
+                else {
+                    // Check if the cell below exists AND is marked as supported
+                    // Since we scan bottom-up, the cell below is already processed.
+                    if (newGrid[y+1][x] && supportedY.has(y+1)) {
+                        isSupported = true;
                     }
-                    
-                    if (supported) {
-                        isSupported.add(key);
-                        changed = true;
-                    }
+                }
+                
+                if (isSupported) {
+                    supportedY.add(y);
                 }
             }
         }
-    }
-    
-    // Remove unsupported
-    for (let y = 0; y < TOTAL_HEIGHT; y++) {
-        for (let x = 0; x < TOTAL_WIDTH; x++) {
-            if (newGrid[y][x] && !isSupported.has(`${x},${y}`)) {
+        
+        // 2. Any block present but not in supportedY is falling
+        for (let y = 0; y < TOTAL_HEIGHT; y++) {
+            if (newGrid[y][x] && !supportedY.has(y)) {
                 falling.push({
                     data: newGrid[y][x]!,
                     x,

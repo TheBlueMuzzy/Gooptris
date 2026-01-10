@@ -238,11 +238,16 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
 
         // Removal
         let tempGrid = grid.map(row => [...row]);
+        const uniqueCols = new Set<number>();
+        
         group.forEach(pt => {
             tempGrid[pt.y][pt.x] = null;
+            uniqueCols.add(pt.x);
         });
+        
+        const colsToCheck = Array.from(uniqueCols);
 
-        const { grid: cleanGrid, falling: newFalling } = getFloatingBlocks(tempGrid);
+        const { grid: cleanGrid, falling: newFalling } = getFloatingBlocks(tempGrid, colsToCheck);
 
         setGrid(cleanGrid);
         setFallingBlocks(prev => [...prev, ...newFalling]);
