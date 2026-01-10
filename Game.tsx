@@ -444,8 +444,9 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
                       }
                       
                       const elapsed = Date.now() - lockStartTimeRef.current;
+                      const effectiveLockDelay = isSoftDropping ? 0 : LOCK_DELAY_MS;
                       
-                      if (elapsed > LOCK_DELAY_MS) {
+                      if (elapsed > effectiveLockDelay) {
                           // === TIME EXPIRED: LOCK PIECE ===
                           
                           // Speed Score logic
