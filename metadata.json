@@ -1,5 +1,5 @@
 {
-  "name": "Slidetris",
+  "name": "Celltris",
   "description": "An inverted puzzle game where you rotate the world instead of the pieces. Match triangles to form hexagons in a cylindrical grid.",
   "requestFramePermissions": []
 }

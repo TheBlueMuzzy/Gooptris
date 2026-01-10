@@ -286,6 +286,14 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
             </defs>
             {renderCells}
         </svg>
+
+        {/* Cylinder Gradient Overlay */}
+        <div 
+          className="absolute inset-0 pointer-events-none z-10"
+          style={{
+             background: 'linear-gradient(90deg, rgba(15,23,42,0.85) 0%, rgba(15,23,42,0) 25%, rgba(15,23,42,0) 75%, rgba(15,23,42,0.85) 100%)'
+          }}
+        />
     </div>
   );
 };
