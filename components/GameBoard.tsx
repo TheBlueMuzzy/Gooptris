@@ -162,23 +162,32 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
             const rightSame = grid[y][normalizeX(gridX+1)]?.groupId === cell.groupId;
 
             // Fill Logic
-            const totalDuration = BASE_FILL_DURATION + (cell.groupSize * PER_BLOCK_DURATION);
+            // Total Time = N * 375ms
+            const totalDuration = cell.groupSize * PER_BLOCK_DURATION;
+            // Height in rows
             const groupHeight = (cell.groupMaxY - cell.groupMinY + 1);
-            const indexFromBottom = cell.groupMaxY - y;
-            const segmentDuration = totalDuration / groupHeight;
-            const startDelay = indexFromBottom * segmentDuration;
+            // Time per row
+            const timePerRow = totalDuration / groupHeight;
+            // Row index from bottom (0 = bottom most row)
+            const rowIndex = cell.groupMaxY - y; 
+            
+            // Animation start time for this row
+            const startDelay = rowIndex * timePerRow;
             const animDelay = (cell.timestamp + startDelay) - now;
+            const segmentDuration = timePerRow;
 
             elements.push(
                 <g key={`cell-${cell.id}-${cell.timestamp}`} className={cell.timestamp + totalDuration < now ? "glow-anim" : ""}>
-                    {/* Main Color Block */}
+                    {/* Shell / Background - Outline only (transparent fill) */}
                     <rect
                         x={startX}
                         y={yPos}
                         width={cellWidth}
                         height={BLOCK_SIZE}
                         fill={cell.color}
-                        fillOpacity={0.1}
+                        fillOpacity={0.05} 
+                        stroke={cell.color}
+                        strokeWidth="0" 
                     />
                     
                     {/* Animated Fill Meter */}
@@ -202,7 +211,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
                         }} 
                     />
 
-                    {/* Borders */}
+                    {/* Borders - Drawn on top to define the "Shell" */}
                     {!topSame && <line x1={startX} y1={yPos} x2={startX+cellWidth} y2={yPos} stroke={cell.color} strokeWidth="2" />}
                     {!bottomSame && <line x1={startX} y1={yPos+BLOCK_SIZE} x2={startX+cellWidth} y2={yPos+BLOCK_SIZE} stroke={cell.color} strokeWidth="2" />}
                     {!leftSame && <line x1={startX} y1={yPos} x2={startX} y2={yPos+BLOCK_SIZE} stroke={cell.color} strokeWidth="2" />}

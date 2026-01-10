@@ -150,7 +150,6 @@ export const updateGroups = (grid: GridCell[][]): GridCell[][] => {
             const cell = newGrid[y][x];
             if (cell && !visited.has(`${x},${y}`)) {
                 const group = findColorGroup(x, y, cell.color);
-                const newGroupId = Math.random().toString(36).substr(2, 9);
                 
                 let minY = TOTAL_HEIGHT;
                 let maxY = -1;
@@ -159,16 +158,41 @@ export const updateGroups = (grid: GridCell[][]): GridCell[][] => {
                     if (pt.y < minY) minY = pt.y;
                     if (pt.y > maxY) maxY = pt.y;
                 });
+
+                const newGroupSize = group.length;
+
+                // Determine if this is a "changed" group (merge happened) or "unchanged"
+                // It is unchanged if all current members have the same groupId and groupSize as the detected group
+                let isUnchanged = true;
+                const referenceId = cell.groupId;
+                const referenceSize = cell.groupSize;
+                
+                if (referenceSize !== newGroupSize) {
+                    isUnchanged = false;
+                } else {
+                    for (const pt of group) {
+                        const member = newGrid[pt.y][pt.x];
+                        if (!member || member.groupId !== referenceId || member.groupSize !== referenceSize) {
+                            isUnchanged = false;
+                            break;
+                        }
+                    }
+                }
+
+                const groupIdToUse = isUnchanged ? referenceId : Math.random().toString(36).substr(2, 9);
+                // If changed (merged), reset timestamp to now to trigger fresh animation
+                const timestampToUse = isUnchanged ? cell.timestamp : Date.now();
                 
                 group.forEach(pt => {
                     visited.add(`${pt.x},${pt.y}`);
                     const c = newGrid[pt.y][pt.x]!;
                     newGrid[pt.y][pt.x] = {
                         ...c,
-                        groupId: newGroupId,
+                        groupId: groupIdToUse,
+                        timestamp: timestampToUse,
                         groupMinY: minY,
                         groupMaxY: maxY,
-                        groupSize: group.length
+                        groupSize: newGroupSize
                     };
                 });
             }

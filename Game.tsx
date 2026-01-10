@@ -184,10 +184,11 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
      if (!cell) return;
 
      const now = Date.now();
-     const totalDuration = BASE_FILL_DURATION + (cell.groupSize * PER_BLOCK_DURATION);
+     // Total Time = N * 375ms
+     const totalDuration = cell.groupSize * PER_BLOCK_DURATION;
      const elapsed = now - (cell.timestamp || 0); 
      
-     if (!(elapsed >= totalDuration)) {
+     if (elapsed < totalDuration) {
          return;
      }
 
