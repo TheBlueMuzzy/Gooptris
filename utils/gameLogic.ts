@@ -6,29 +6,27 @@ export const normalizeX = (x: number): number => {
 };
 
 export const getRotatedCells = (cells: Coordinate[], clockwise: boolean): Coordinate[] => {
-  return cells.map(cell => {
-    if (clockwise) return { x: -cell.y, y: cell.x };
-    return { x: cell.y, y: -cell.x };
+  return cells.map(({ x, y }) => {
+    if (clockwise) {
+      return { x: -y, y: x };
+    } else {
+      return { x: y, y: -x };
+    }
   });
 };
 
-export const spawnPiece = (pieceDef?: PieceDefinition): ActivePiece => {
-  const definition = pieceDef || PIECES[Math.floor(Math.random() * PIECES.length)];
+export const spawnPiece = (definition?: PieceDefinition): ActivePiece => {
+  const def = definition || PIECES[Math.floor(Math.random() * PIECES.length)];
   const color = GAME_COLORS[Math.floor(Math.random() * GAME_COLORS.length)];
   
-  const activeDef = {
-    ...definition,
-    color
-  };
-
   return {
-    definition: activeDef,
-    x: 0, 
-    y: 0,
+    definition: { ...def, color },
+    x: 0, // Set by caller
+    y: 0, // Set by caller
     rotation: 0,
-    cells: [...activeDef.cells],
+    cells: [...def.cells],
     spawnTimestamp: Date.now(),
-    startSpawnY: 0
+    startSpawnY: 0 // Set by caller
   };
 };
 
@@ -36,274 +34,230 @@ export const checkCollision = (grid: GridCell[][], piece: ActivePiece, boardOffs
   for (const cell of piece.cells) {
     const x = normalizeX(piece.x + cell.x);
     const y = piece.y + cell.y;
-    
-    // 1. Check the primary grid cell (Math.floor)
-    const floorY = Math.floor(y);
-    
-    // Bounds check for floorY
-    if (floorY >= TOTAL_HEIGHT) return true;
-    // Collision check for floorY
-    if (floorY >= 0 && grid[floorY][x] !== null) return true;
 
-    // 2. Check the secondary grid cell (Math.ceil) if we are partially in the next row
-    // We use a small epsilon (0.05) to allow "resting" exactly on a line without triggering collision,
-    // but catching any significant penetration.
-    if (y - floorY > 0.05) {
-        const ceilY = floorY + 1;
-        if (ceilY >= TOTAL_HEIGHT) return true;
-        if (ceilY >= 0 && grid[ceilY][x] !== null) return true;
+    // Floor Check:
+    // A block at y spans [y, y+1).
+    // It hits the floor if the bottom edge (y + 1) is > TOTAL_HEIGHT.
+    // Use a small epsilon to handle float precision issues at the boundary.
+    if (y + 1 > TOTAL_HEIGHT) return true; 
+    
+    // Grid Cell Check:
+    // We must check all integer grid rows that this block overlaps.
+    // A block at y spans [y, y+1).
+    // It overlaps row R if the interval [y, y+1) intersects [R, R+1).
+    // This is effectively rows floor(y) through floor(y + 1 - epsilon).
+    
+    const rStart = Math.floor(y);
+    const rEnd = Math.floor(y + 1 - 0.0001);
+
+    for (let r = rStart; r <= rEnd; r++) {
+        if (r >= 0 && r < TOTAL_HEIGHT) {
+           if (grid[r][x] !== null) return true;
+        }
     }
   }
   return false;
 };
 
-export const updateGroups = (grid: GridCell[][]): GridCell[][] => {
-  const newGrid = grid.map(row => [...row]);
+export const getGhostY = (grid: GridCell[][], piece: ActivePiece, boardOffset: number): number => {
+  let y = Math.floor(piece.y);
+  while (!checkCollision(grid, { ...piece, y: y + 1 }, boardOffset)) {
+    y += 1;
+  }
+  return y;
+};
+
+export const findContiguousGroup = (grid: GridCell[][], startX: number, startY: number): Coordinate[] => {
+  const startCell = grid[startY][startX];
+  if (!startCell) return [];
+
+  const group: Coordinate[] = [];
   const visited = new Set<string>();
-  const getPosKey = (x: number, y: number) => `${x},${y}`;
-  const now = Date.now();
+  const queue: Coordinate[] = [{ x: startX, y: startY }];
   
-  // Track which group IDs have been processed in this cycle to detect splits
-  const processedGroupIds = new Set<string>();
+  const targetGroupId = startCell.groupId;
 
-  for (let y = 0; y < TOTAL_HEIGHT; y++) {
-    for (let x = 0; x < TOTAL_WIDTH; x++) {
-      const cell = newGrid[y][x];
-      const key = getPosKey(x, y);
+  while (queue.length > 0) {
+    const { x, y } = queue.shift()!;
+    const key = `${x},${y}`;
+    
+    if (visited.has(key)) continue;
+    visited.add(key);
+    group.push({ x, y });
 
-      if (cell && !visited.has(key)) {
-        const queue = [{x, y}];
-        const groupCells: {x: number, y: number, cell: BlockData}[] = [];
+    const neighbors = [
+      { x: normalizeX(x + 1), y: y },
+      { x: normalizeX(x - 1), y: y },
+      { x: x, y: y + 1 },
+      { x: x, y: y - 1 }
+    ];
+
+    for (const n of neighbors) {
+      if (n.y >= 0 && n.y < TOTAL_HEIGHT) {
+        const neighborCell = grid[n.y][n.x];
+        // Match by group ID for clearing logic, assuming groups are correctly maintained
+        if (neighborCell && neighborCell.groupId === targetGroupId) {
+           if (!visited.has(`${n.x},${n.y}`)) {
+             queue.push(n);
+           }
+        }
+      }
+    }
+  }
+
+  return group;
+};
+
+export const updateGroups = (grid: GridCell[][]): GridCell[][] => {
+    const newGrid = grid.map(row => [...row]);
+    const visited = new Set<string>();
+    
+    // Helper to find color-contiguous group
+    const findColorGroup = (gx: number, gy: number, color: string): Coordinate[] => {
+        const g: Coordinate[] = [];
+        const q: Coordinate[] = [{x: gx, y: gy}];
+        const v = new Set<string>();
         
-        let hasNewBlocks = false;
-        const existingGroupIds = new Set<string>();
-        let originalTimestamp = cell.timestamp;
-        const color = cell.color;
-        
-        visited.add(key);
-        
-        let ptr = 0;
-        while(ptr < queue.length) {
-            const cur = queue[ptr++];
-            const curCell = newGrid[cur.y][cur.x]!;
-            groupCells.push({x: cur.x, y: cur.y, cell: curCell});
+        while(q.length > 0) {
+            const curr = q.shift()!;
+            const key = `${curr.x},${curr.y}`;
+            if(v.has(key)) continue;
+            v.add(key);
+            g.push(curr);
             
-            // Check if block is new (empty groupId from mergePiece) or existing
-            if (curCell.groupId === '') {
-                hasNewBlocks = true;
-            } else {
-                existingGroupIds.add(curCell.groupId);
-                originalTimestamp = curCell.timestamp;
-            }
-
-            const neighbors = [
-                {x: normalizeX(cur.x + 1), y: cur.y},
-                {x: normalizeX(cur.x - 1), y: cur.y},
-                {x: cur.x, y: cur.y + 1},
-                {x: cur.x, y: cur.y - 1}
+            const nbs = [
+                { x: normalizeX(curr.x + 1), y: curr.y },
+                { x: normalizeX(curr.x - 1), y: curr.y },
+                { x: curr.x, y: curr.y + 1 },
+                { x: curr.x, y: curr.y - 1 }
             ];
-
-            for (const n of neighbors) {
-                if (n.y >= 0 && n.y < TOTAL_HEIGHT) {
-                    const nKey = getPosKey(n.x, n.y);
-                    const nCell = newGrid[n.y][n.x];
-                    if (nCell && nCell.color === color && !visited.has(nKey)) {
-                        visited.add(nKey);
-                        queue.push(n);
+            
+            for(const n of nbs) {
+                if(n.y >= 0 && n.y < TOTAL_HEIGHT) {
+                    const c = newGrid[n.y][n.x];
+                    if(c && c.color === color && !v.has(`${n.x},${n.y}`)) {
+                        q.push(n);
                     }
                 }
             }
         }
+        return g;
+    };
 
-        let minY = TOTAL_HEIGHT;
-        let maxY = -1;
-        
-        groupCells.forEach(gc => {
-            if (gc.y < minY) minY = gc.y;
-            if (gc.y > maxY) maxY = gc.y;
-        });
-
-        const size = groupCells.length;
-
-        // Determine Final Group ID and Timestamp
-        let finalGroupId = Math.random().toString(36).substr(2, 9);
-        let finalTimestamp = now;
-
-        if (hasNewBlocks) {
-            if (existingGroupIds.size > 0) {
-                // Case: Merged with existing blocks -> Reset refill (0 progress)
-                finalTimestamp = now;
-            } else {
-                // Case: Isolated new piece -> Start full (100% progress)
-                finalTimestamp = 0;
-            }
-        } else {
-            // No new blocks
-            if (existingGroupIds.size === 1) {
-                const oldId = Array.from(existingGroupIds)[0];
-                if (processedGroupIds.has(oldId)) {
-                    // Split detected (ID used already) -> Reset refill
-                    finalTimestamp = now;
-                } else {
-                    // Stable group -> Keep original ID and Timestamp
-                    finalGroupId = oldId;
-                    finalTimestamp = originalTimestamp;
-                    processedGroupIds.add(oldId);
-                }
-            } else {
-                // Merging multiple existing groups (e.g. via gravity) -> Reset refill
-                finalTimestamp = now;
+    for (let y = 0; y < TOTAL_HEIGHT; y++) {
+        for (let x = 0; x < TOTAL_WIDTH; x++) {
+            const cell = newGrid[y][x];
+            if (cell && !visited.has(`${x},${y}`)) {
+                const group = findColorGroup(x, y, cell.color);
+                const newGroupId = Math.random().toString(36).substr(2, 9);
+                
+                let minY = TOTAL_HEIGHT;
+                let maxY = -1;
+                
+                group.forEach(pt => {
+                    if (pt.y < minY) minY = pt.y;
+                    if (pt.y > maxY) maxY = pt.y;
+                });
+                
+                group.forEach(pt => {
+                    visited.add(`${pt.x},${pt.y}`);
+                    const c = newGrid[pt.y][pt.x]!;
+                    newGrid[pt.y][pt.x] = {
+                        ...c,
+                        groupId: newGroupId,
+                        groupMinY: minY,
+                        groupMaxY: maxY,
+                        groupSize: group.length
+                    };
+                });
             }
         }
-
-        groupCells.forEach(gc => {
-            newGrid[gc.y][gc.x] = {
-                ...gc.cell,
-                groupId: finalGroupId,
-                groupMinY: minY,
-                groupMaxY: maxY,
-                groupSize: size,
-                timestamp: finalTimestamp
-            };
-        });
-      }
     }
-  }
-  return newGrid;
+    return newGrid;
 };
 
 export const mergePiece = (grid: GridCell[][], piece: ActivePiece): GridCell[][] => {
   const newGrid = grid.map(row => [...row]);
-  const color = piece.definition.color;
+  const groupId = Math.random().toString(36).substr(2, 9);
   const now = Date.now();
+  
+  let minY = TOTAL_HEIGHT;
+  let maxY = -1;
+  
+  piece.cells.forEach(cell => {
+      const y = Math.floor(piece.y + cell.y);
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+  });
 
-  for (const cell of piece.cells) {
+  const groupSize = piece.cells.length;
+
+  piece.cells.forEach(cell => {
     const x = normalizeX(piece.x + cell.x);
-    // Map float Y to integer grid row
     const y = Math.floor(piece.y + cell.y);
     
     if (y >= 0 && y < TOTAL_HEIGHT) {
       newGrid[y][x] = {
         id: Math.random().toString(36).substr(2, 9),
-        groupId: '', // Mark as temp/new
+        groupId,
         timestamp: now,
-        color,
-        groupMinY: 0,
-        groupMaxY: 0,
-        groupSize: 0
+        color: piece.definition.color,
+        groupMinY: minY,
+        groupMaxY: maxY,
+        groupSize
       };
     }
-  }
+  });
   
   return updateGroups(newGrid);
 };
 
-export const findContiguousGroup = (grid: GridCell[][], startX: number, startY: number): Coordinate[] => {
-    const startCell = grid[startY][startX];
-    if (!startCell) return [];
-    
-    const group: Coordinate[] = [];
-    const visited = new Set<string>();
-    const queue = [{x: startX, y: startY}];
-    visited.add(`${startX},${startY}`);
-    const color = startCell.color;
-
-    while(queue.length > 0) {
-        const {x, y} = queue.shift()!;
-        group.push({x, y});
-
-        const neighbors = [
-            {x: normalizeX(x + 1), y: y},
-            {x: normalizeX(x - 1), y: y},
-            {x: x, y: y + 1},
-            {x: x, y: y - 1}
-        ];
-
-        for (const n of neighbors) {
-            if (n.y >= 0 && n.y < TOTAL_HEIGHT) {
-                const nCell = grid[n.y][n.x];
-                if (nCell && nCell.color === color && !visited.has(`${n.x},${n.y}`)) {
-                    visited.add(`${n.x},${n.y}`);
-                    queue.push(n);
-                }
-            }
-        }
-    }
-    return group;
-}
-
-export const getGhostY = (grid: GridCell[][], piece: ActivePiece, boardOffset: number): number => {
-    // Start searching from the current integer position
-    let y = Math.floor(piece.y);
-    while(true) {
-        if (checkCollision(grid, {...piece, y: y + 1}, boardOffset)) {
-            return y;
-        }
-        y++;
-    }
-};
-
 export const getFloatingBlocks = (grid: GridCell[][]): { grid: GridCell[][], falling: FallingBlock[] } => {
-    const grounded = new Set<string>();
-    const queue: {x: number, y: number}[] = [];
-    const lastRow = TOTAL_HEIGHT - 1;
-
-    // 1. Initial Grounding: Floor
-    for (let x = 0; x < TOTAL_WIDTH; x++) {
-        if (grid[lastRow][x] !== null) {
-            const key = `${x},${lastRow}`;
-            grounded.add(key);
-            queue.push({x, y: lastRow});
-        }
-    }
-
-    // 2. BFS for Support
-    let head = 0;
-    while(head < queue.length) {
-        const {x, y} = queue[head++];
-        const currentBlock = grid[y][x]!;
-
-        // Rule A: Support blocks Resting ON TOP (Gravity support)
-        // A block at (y) supports a block at (y-1) regardless of group/color
-        const aboveY = y - 1;
-        if (aboveY >= 0 && grid[aboveY][x] !== null) {
-            const key = `${x},${aboveY}`;
-            if (!grounded.has(key)) {
-                grounded.add(key);
-                queue.push({x, y: aboveY});
-            }
-        }
-
-        // Rule B: Sticky Support (Same Group) in all directions
-        // A block supports neighbors if they belong to the SAME group (sticky)
-        const neighbors = [
-            {x: normalizeX(x + 1), y},
-            {x: normalizeX(x - 1), y},
-            {x, y: y + 1}, // Below (hanging piece of same group)
-            // {x, y: y - 1} // Above is covered by Rule A, but redundant check is fine
-        ];
-
-        for (const n of neighbors) {
-            if (n.y >= 0 && n.y < TOTAL_HEIGHT) {
-                const nBlock = grid[n.y][n.x];
-                if (nBlock !== null) {
-                     const key = `${n.x},${n.y}`;
-                     if (!grounded.has(key) && nBlock.groupId === currentBlock.groupId) {
-                         grounded.add(key);
-                         queue.push(n);
-                     }
-                }
-            }
-        }
-    }
-
-    // 3. Separate ungrounded blocks
     const newGrid = grid.map(row => [...row]);
     const falling: FallingBlock[] = [];
-
+    const isSupported = new Set<string>();
+    
+    // Strict Vertical Gravity
+    // Blocks are only supported if they are on the floor or on top of another supported block.
+    // Lateral adjacency does NOT provide support during this phase.
+    
+    let changed = true;
+    while (changed) {
+        changed = false;
+        // Scan bottom-up
+        for (let y = TOTAL_HEIGHT - 1; y >= 0; y--) {
+            for (let x = 0; x < TOTAL_WIDTH; x++) {
+                if (newGrid[y][x]) {
+                    const key = `${x},${y}`;
+                    if (isSupported.has(key)) continue;
+                    
+                    let supported = false;
+                    // 1. Floor support
+                    if (y === TOTAL_HEIGHT - 1) {
+                        supported = true;
+                    } 
+                    // 2. Block below support
+                    else {
+                        const below = newGrid[y+1][x];
+                        // Must be occupied AND supported
+                        if (below && isSupported.has(`${x},${y+1}`)) {
+                           supported = true;
+                        }
+                    }
+                    
+                    if (supported) {
+                        isSupported.add(key);
+                        changed = true;
+                    }
+                }
+            }
+        }
+    }
+    
+    // Remove unsupported
     for (let y = 0; y < TOTAL_HEIGHT; y++) {
         for (let x = 0; x < TOTAL_WIDTH; x++) {
-            if (newGrid[y][x] !== null && !grounded.has(`${x},${y}`)) {
+            if (newGrid[y][x] && !isSupported.has(`${x},${y}`)) {
                 falling.push({
                     data: newGrid[y][x]!,
                     x,
@@ -314,7 +268,7 @@ export const getFloatingBlocks = (grid: GridCell[][]): { grid: GridCell[][], fal
             }
         }
     }
-
+    
     return { grid: newGrid, falling };
 };
 
@@ -322,120 +276,75 @@ export const updateFallingBlocks = (
     blocks: FallingBlock[], 
     grid: GridCell[][], 
     dt: number,
-    baseSpeed: number
-  ): { active: FallingBlock[], landed: FallingBlock[] } => {
+    gameSpeed: number
+): { active: FallingBlock[], landed: FallingBlock[] } => {
+    
     const active: FallingBlock[] = [];
     const landed: FallingBlock[] = [];
+    const FALL_SPEED = 0.02 * dt; 
     
-    // Fall 3x faster than the base game speed
-    const FALL_SPEED = (1 / baseSpeed) * 3; 
-  
-    for (const block of blocks) {
-      const nextY = block.y + (FALL_SPEED * dt);
-      const col = block.x;
-      
-      // Determine the precise Y coordinate where this block would collide with the floor or another block.
-      // We scan downwards from the current position.
-      let landingRow = TOTAL_HEIGHT;
-      for (let r = Math.floor(block.y) + 1; r < TOTAL_HEIGHT; r++) {
-          if (grid[r][col] !== null) {
-              landingRow = r;
-              break;
-          }
-      }
-
-      // The block sits on top of landingRow, so its Y can be at most (landingRow - 1.0)
-      const maxY = landingRow - 1;
-
-      if (nextY > maxY) {
-          // If moving to nextY would penetrate the floor, clamp it and mark as landed
-          landed.push({ ...block, y: maxY });
-      } else {
-          // Otherwise keep falling
-          active.push({ ...block, y: nextY });
-      }
+    const sortedBlocks = [...blocks].sort((a, b) => b.y - a.y);
+    
+    for (const block of sortedBlocks) {
+        const nextY = block.y + FALL_SPEED;
+        
+        if (nextY >= TOTAL_HEIGHT - 1) {
+            landed.push({ ...block, y: TOTAL_HEIGHT - 1 });
+            continue;
+        }
+        
+        const checkRow = Math.floor(nextY + 1);
+        const col = block.x;
+        
+        if (grid[checkRow] && grid[checkRow][col]) {
+             landed.push({ ...block, y: Math.floor(nextY) });
+        } else {
+             active.push({ ...block, y: nextY });
+        }
     }
     
     return { active, landed };
-  };
-
-// --- SCORING HELPERS ---
+};
 
 export const calculateHeightBonus = (y: number): number => {
-    const bottomRow = TOTAL_HEIGHT - 1;
-    const topRow = BUFFER_HEIGHT;
-    
-    // If somehow below floor (shouldn't happen), 0
-    if (y >= bottomRow) return 0;
-    // If in buffer or above, max points
-    if (y <= topRow) return 200;
-    
-    // Linear interpolation
-    // Range size = 19 (indices 4 to 23)
-    const range = bottomRow - topRow;
-    const delta = bottomRow - y;
-    const fraction = delta / range;
-    const rawPoints = 200 * fraction;
-    
-    // Round up to nearest 5
-    return Math.ceil(rawPoints / 5) * 5;
+    return Math.max(0, (TOTAL_HEIGHT - y) * 10);
 };
 
 export const calculateOffScreenBonus = (x: number, boardOffset: number): number => {
-    // Relative position in the 30-width cylinder, shifted so boardOffset is 0
-    const relX = normalizeX(x - boardOffset);
+    const center = normalizeX(boardOffset + VISIBLE_WIDTH / 2);
+    let dist = Math.abs(x - center);
+    if (dist > TOTAL_WIDTH / 2) dist = TOTAL_WIDTH - dist;
     
-    // Visible range is 0 to (VISIBLE_WIDTH - 1) i.e. 0-9
-    if (relX < VISIBLE_WIDTH) return 0;
-    
-    // Distance to right edge (index 9)
-    const distRight = relX - (VISIBLE_WIDTH - 1);
-    
-    // Distance to left edge (index 0) wrapping around
-    const distLeft = TOTAL_WIDTH - relX;
-    
-    const dist = Math.min(distRight, distLeft);
-    return dist; // 1 point per unit distance
+    if (dist > VISIBLE_WIDTH / 2) {
+        return 50;
+    }
+    return 0;
 };
 
-// n is the cumulative block number destroyed in this combo sequence (1-indexed)
-export const calculateMultiplier = (n: number): number => {
-    // n=1 -> 1.0
-    // n=2 -> 1.25
-    // n=3 -> 1.75
-    // Formula: 1 + 0.125 * n * (n - 1)
-    // Proof:
-    // 1: 1 + 0 = 1
-    // 2: 1 + 0.125*2*1 = 1.25
-    // 3: 1 + 0.125*3*2 = 1.75
-    // 4: 1 + 0.125*4*3 = 2.5
-    return 1 + (0.125 * n * (n - 1));
+export const calculateMultiplier = (combo: number): number => {
+    return 1 + (combo * 0.1);
 };
 
-export const calculateAdjacencyBonus = (grid: GridCell[][], groupCells: Coordinate[]): number => {
-    const uniqueNeighborGroups = new Set<string>();
-    const groupSet = new Set(groupCells.map(c => `${c.x},${c.y}`));
+export const calculateAdjacencyBonus = (grid: GridCell[][], group: Coordinate[]): number => {
+    let neighborsCount = 0;
+    const groupKeys = new Set(group.map(g => `${g.x},${g.y}`));
     
-    groupCells.forEach(cell => {
-         const neighbors = [
-            {x: normalizeX(cell.x + 1), y: cell.y},
-            {x: normalizeX(cell.x - 1), y: cell.y},
-            {x: cell.x, y: cell.y + 1},
-            {x: cell.x, y: cell.y - 1}
+    group.forEach(({x, y}) => {
+         const nbs = [
+            { x: normalizeX(x + 1), y },
+            { x: normalizeX(x - 1), y },
+            { x, y: y + 1 },
+            { x, y: y - 1 }
         ];
         
-        neighbors.forEach(n => {
+        nbs.forEach(n => {
             if (n.y >= 0 && n.y < TOTAL_HEIGHT) {
-                // If it's not part of the group itself
-                if (!groupSet.has(`${n.x},${n.y}`)) {
-                    const neighborCell = grid[n.y][n.x];
-                    if (neighborCell) {
-                        uniqueNeighborGroups.add(neighborCell.groupId);
-                    }
+                if (grid[n.y][n.x] && !groupKeys.has(`${n.x},${n.y}`)) {
+                    neighborsCount++;
                 }
             }
         });
     });
     
-    return uniqueNeighborGroups.size * 5;
+    return neighborsCount * 5;
 };
