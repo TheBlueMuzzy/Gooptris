@@ -1,0 +1,16 @@
+{
+  "short_name": "Slidetris",
+  "name": "Slidetris: Cylinder Puzzle",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/box.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#0f172a",
+  "background_color": "#0f172a",
+  "orientation": "portrait"
+}

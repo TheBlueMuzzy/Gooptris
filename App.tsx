@@ -33,40 +33,83 @@ const App: React.FC = () => {
   const [isSoftDropping, setIsSoftDropping] = useState(false);
   const [timeLeft, setTimeLeft] = useState(INITIAL_TIME_MS);
   
+  // Critical control refs for the game loop to avoid state sync lag
+  const gameOverRef = useRef(false);
+  const isPausedRef = useRef(false);
+
   const lastTimeRef = useRef<number>(0);
+  const heldKeys = useRef<Set<string>>(new Set());
+  
+  // Ref to hold latest state for the animation loop
+  const stateRef = useRef({ activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft });
 
   useEffect(() => {
     startNewGame();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const getCenteredSpawnX = (offset: number) => {
+    return normalizeX(offset + Math.floor((VISIBLE_WIDTH - 1) / 2));
+  };
+
   const startNewGame = () => {
-    setGrid(createGrid());
-    setBoardOffset(0);
+    const newGrid = createGrid();
+    const newOffset = 0;
+
+    setGrid(newGrid);
+    setBoardOffset(newOffset);
     setScore(0);
+    
     setGameOver(false);
+    gameOverRef.current = false;
+    
+    setIsPaused(false);
+    isPausedRef.current = false;
+
     setStoredPiece(null);
     setCombo(0);
     setCellsCleared(0);
     setGameSpeed(INITIAL_SPEED);
     setCanSwap(true);
-    setIsPaused(false);
     setFallingBlocks([]);
     setIsSoftDropping(false);
     setTimeLeft(INITIAL_TIME_MS);
+    heldKeys.current.clear();
     
-    spawnNewPiece();
+    // Manually spawn first piece to avoid checking collision against stale grid state
+    const piece = spawnPiece();
+    piece.x = getCenteredSpawnX(newOffset);
+    piece.y = 1; 
+    piece.startSpawnY = 1;
+    setActivePiece(piece);
+
+    // Force sync stateRef immediately so the loop doesn't see stale state
+    stateRef.current = {
+        activePiece: piece,
+        grid: newGrid,
+        boardOffset: newOffset,
+        gameOver: false,
+        isPaused: false,
+        gameSpeed: INITIAL_SPEED,
+        isSoftDropping: false,
+        fallingBlocks: [],
+        timeLeft: INITIAL_TIME_MS
+    };
+    
+    // NOTE: We do NOT reset lastTimeRef here to avoid delta spikes. 
+    // The loop will continue using the existing timeline.
   };
 
   const spawnNewPiece = (pieceDef?: PieceDefinition) => {
     const piece = spawnPiece(pieceDef);
-    piece.x = normalizeX(boardOffset + Math.floor(VISIBLE_WIDTH / 2) - 1);
+    piece.x = getCenteredSpawnX(boardOffset);
     piece.y = 1; 
     // Track start Y for speed bonus
     piece.startSpawnY = 1;
 
     if (checkCollision(grid, piece, boardOffset)) {
        setGameOver(true);
+       gameOverRef.current = true;
     } else {
        setActivePiece(piece);
        setCanSwap(true);
@@ -235,7 +278,10 @@ const App: React.FC = () => {
     setGrid(newGrid);
     setActivePiece(null);
     spawnNewPiece();
-    setIsSoftDropping(false);
+    
+    // Check if soft drop keys are still held
+    const isDownHeld = heldKeys.current.has('ArrowDown') || heldKeys.current.has('KeyS');
+    setIsSoftDropping(isDownHeld);
   }, [activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, updateScore]);
 
   const swapPiece = useCallback(() => {
@@ -254,7 +300,7 @@ const App: React.FC = () => {
             spawnTimestamp: Date.now(), // Reset timing on swap
             startSpawnY: 1
           };
-          newPiece.x = normalizeX(boardOffset + Math.floor(VISIBLE_WIDTH / 2) - 1);
+          newPiece.x = normalizeX(boardOffset + Math.floor((VISIBLE_WIDTH - 1) / 2));
           newPiece.y = 1;
 
           if (!checkCollision(grid, newPiece, boardOffset)) {
@@ -271,7 +317,6 @@ const App: React.FC = () => {
   // --- Game Loop ---
   
   // Ref to hold latest state for the animation loop
-  const stateRef = useRef({ activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft });
   useEffect(() => { 
       stateRef.current = { activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft }; 
   }, [activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft]);
@@ -286,15 +331,18 @@ const App: React.FC = () => {
           const dt = time - lastTimeRef.current;
           lastTimeRef.current = time;
 
-          const { gameOver, isPaused, gameSpeed, grid, activePiece, boardOffset, isSoftDropping, fallingBlocks, timeLeft } = stateRef.current;
+          // Read latest state from ref
+          const { gameSpeed, grid, activePiece, boardOffset, isSoftDropping, fallingBlocks, timeLeft } = stateRef.current;
           
-          if (!gameOver && !isPaused) {
+          // Use Control Refs for loop condition to avoid stale state
+          if (!gameOverRef.current && !isPausedRef.current) {
               
               // 0. Timer Logic
               const newTimeLeft = timeLeft - dt;
               if (newTimeLeft <= 0) {
                   setTimeLeft(0);
                   setGameOver(true);
+                  gameOverRef.current = true;
                   // Don't process anything else
                   return; 
               } else {
@@ -387,7 +435,7 @@ const App: React.FC = () => {
                       const nextColor = GAME_COLORS[Math.floor(Math.random() * GAME_COLORS.length)];
                       const newPiece = { 
                            definition: { ...nextDef, color: nextColor },
-                           x: normalizeX(boardOffset + Math.floor(VISIBLE_WIDTH / 2) - 1),
+                           x: normalizeX(boardOffset + Math.floor((VISIBLE_WIDTH - 1) / 2)),
                            y: 1,
                            rotation: 0,
                            cells: nextDef.cells,
@@ -396,10 +444,14 @@ const App: React.FC = () => {
                        };
 
                        setGrid(newGrid);
-                       setIsSoftDropping(false); 
+                       
+                       // Check if soft drop keys are still held
+                       const isDownHeld = heldKeys.current.has('ArrowDown') || heldKeys.current.has('KeyS');
+                       setIsSoftDropping(isDownHeld);
 
                        if (checkCollision(newGrid, newPiece, boardOffset)) {
                            setGameOver(true);
+                           gameOverRef.current = true;
                            setActivePiece(null);
                        } else {
                            setActivePiece(newPiece);
@@ -421,8 +473,14 @@ const App: React.FC = () => {
   // Keyboard
   useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
+          heldKeys.current.add(e.code);
+
           if (e.key === 'Escape') {
-              setIsPaused(prev => !prev);
+              setIsPaused(prev => {
+                  const newVal = !prev;
+                  isPausedRef.current = newVal;
+                  return newVal;
+              });
               return;
           }
           if (gameOver) {
@@ -445,9 +503,14 @@ const App: React.FC = () => {
       };
 
       const handleKeyUp = (e: KeyboardEvent) => {
+          heldKeys.current.delete(e.code);
+
           switch(e.code) {
               case 'ArrowDown': case 'KeyS': 
-                  setIsSoftDropping(false);
+                  // Only stop soft dropping if NEITHER key is held
+                  if (!heldKeys.current.has('ArrowDown') && !heldKeys.current.has('KeyS')) {
+                      setIsSoftDropping(false);
+                  }
                   break;
           }
       };
@@ -482,7 +545,7 @@ const App: React.FC = () => {
         <div className="absolute inset-0 bg-slate-950/80 z-40 flex flex-col items-center justify-center backdrop-blur-sm gap-6">
             <h2 className="text-4xl text-cyan-400 font-bold tracking-widest animate-pulse mb-4">PAUSED</h2>
             <button 
-              onClick={() => setIsPaused(false)}
+              onClick={() => { setIsPaused(false); isPausedRef.current = false; }}
               className="flex items-center gap-3 px-8 py-4 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg shadow-lg shadow-cyan-900/50 transition-all active:scale-95 text-xl"
             >
                <Play className="w-6 h-6 fill-current" /> RESUME

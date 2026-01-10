@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Slidetris</title>
+    <link rel="manifest" href="./manifest.json">
+    <meta name="theme-color" content="#0f172a">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       body {
@@ -11,6 +13,8 @@
         touch-action: none;
         background-color: #0f172a;
         color: #e2e8f0;
+        user-select: none;
+        -webkit-user-select: none;
       }
       /* Prevent pull-to-refresh on mobile */
       html, body {
@@ -31,5 +35,19 @@
 </head>
   <body>
     <div id="root"></div>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('./sw.js').then(
+            (registration) => {
+              console.log('ServiceWorker registration successful');
+            },
+            (err) => {
+              console.log('ServiceWorker registration failed: ', err);
+            }
+          );
+        });
+      }
+    </script>
   </body>
 </html>
