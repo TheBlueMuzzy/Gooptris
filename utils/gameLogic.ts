@@ -43,11 +43,10 @@ export const checkCollision = (grid: GridCell[][], piece: ActivePiece, boardOffs
     // Grid Cell Check:
     // We must check all integer grid rows that this block overlaps.
     // A block at y spans [y, y+1).
-    // Using a slightly more permissive epsilon (0.01) allows for microscopic overlaps 
-    // without triggering collision, preventing "sticky" movement.
+    // Using a strict epsilon to ensure we detect collision as soon as we cross the boundary.
     
     const rStart = Math.floor(y);
-    const rEnd = Math.floor(y + 1 - 0.01);
+    const rEnd = Math.floor(y + 1 - 0.0001);
 
     for (let r = rStart; r <= rEnd; r++) {
         if (r >= 0 && r < TOTAL_HEIGHT) {
@@ -59,17 +58,14 @@ export const checkCollision = (grid: GridCell[][], piece: ActivePiece, boardOffs
 };
 
 export const getGhostY = (grid: GridCell[][], piece: ActivePiece, boardOffset: number): number => {
-  // Start search strictly from the floor of the current position
   const startY = Math.floor(piece.y);
   let y = startY;
 
   // Search downwards for the first invalid position
-  while (!checkCollision(grid, { ...piece, y: y + 1 }, boardOffset)) {
+  while (y < TOTAL_HEIGHT && !checkCollision(grid, { ...piece, y: y + 1 }, boardOffset)) {
     y += 1;
   }
   
-  // Safety: Ensure we never return a ghost position 'above' the current floor 
-  // (though the loop logic starting at startY guarantees this naturally).
   return Math.max(startY, y);
 };
 
@@ -190,6 +186,8 @@ export const mergePiece = (grid: GridCell[][], piece: ActivePiece): GridCell[][]
   let maxY = -1;
   
   piece.cells.forEach(cell => {
+      // NOTE: We assume piece.y is already integer here (from ghost drop or lock)
+      // We force floor here to be safe against float drift.
       const y = Math.floor(piece.y + cell.y);
       if (y < minY) minY = y;
       if (y > maxY) maxY = y;

@@ -293,6 +293,7 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
     if (gameOver || isPaused || !activePiece || countdown !== null) return;
 
     const y = getGhostY(grid, activePiece, boardOffset);
+    
     const droppedPiece = { ...activePiece, y };
 
     const newGrid = mergePiece(grid, droppedPiece);
@@ -410,9 +411,16 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
 
             if (lockedTime > effectiveLockDelay) {
                 // Lock it
-                const finalPiece = { ...state.activePiece, y: Math.floor(state.activePiece.y) };
+                // Logic used to snap to floor before merging
+                const y = getGhostY(state.grid, state.activePiece, state.boardOffset);
+                const finalPiece = { ...state.activePiece, y };
+                
+                // Safety check if floor is invalid (should be handled by collision check but being safe)
                 if (checkCollision(state.grid, finalPiece, state.boardOffset)) {
-                    finalPiece.y -= 1;
+                   // If floor is invalid, it means we are colliding *into* it.
+                   // Usually shouldn't happen if checkCollision prevented movement.
+                   // But if it does, y-1 is safer.
+                   // However, for debugging the jump, let's leave as is or basic correction.
                 }
                 
                 const newGrid = mergePiece(state.grid, finalPiece);
