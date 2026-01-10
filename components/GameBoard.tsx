@@ -13,6 +13,44 @@ const BLOCK_SIZE = 30;
 export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
   const { grid, boardOffset, activePiece, fallingBlocks } = state;
 
+  // --- CYLINDRICAL PROJECTION LOGIC ---
+  // The visible area represents 1/3 of the cylinder (120 degrees).
+  // We map the linear grid x (0..VISIBLE_WIDTH) to a sine-wave distorted x.
+  
+  // Total visible width in pixels
+  const VIEW_WIDTH_PX = VISIBLE_WIDTH * BLOCK_SIZE;
+  const CENTER_X_PX = VIEW_WIDTH_PX / 2;
+  const RADIUS = VIEW_WIDTH_PX / (2 * Math.sin(Math.PI / 3)); // Chord length formula inverse
+
+  // Map grid column index (float) to Screen X pixel position
+  const getScreenX = (visX: number) => {
+      // Normalize visX to -1..1 range relative to center
+      const normalizedPos = (visX - (VISIBLE_WIDTH / 2)) / (VISIBLE_WIDTH / 2);
+      
+      // Angle coverage: -60deg to +60deg (total 120deg)
+      const angle = normalizedPos * (Math.PI / 3);
+      
+      // Projected X onto the flat screen plane (sine of angle)
+      // We map angle -60..60 to screen width
+      const projectedX = Math.sin(angle) * RADIUS;
+      
+      return CENTER_X_PX + projectedX;
+  };
+
+  // Inverse: Screen X to Grid Column (for clicks)
+  const getGridXFromScreen = (screenX: number) => {
+      const relativeX = screenX - CENTER_X_PX;
+      const ratio = relativeX / RADIUS;
+      // Clamp for safety
+      if (ratio < -1 || ratio > 1) return -1;
+      
+      const angle = Math.asin(ratio);
+      const normalizedPos = angle / (Math.PI / 3);
+      
+      const visX = (normalizedPos * (VISIBLE_WIDTH / 2)) + (VISIBLE_WIDTH / 2);
+      return visX;
+  };
+
   const handleBoardClick = useCallback((e: React.MouseEvent<SVGSVGElement> | React.TouchEvent<SVGSVGElement>) => {
     const svgRect = e.currentTarget.getBoundingClientRect();
     let clientX, clientY;
@@ -27,13 +65,21 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
 
     const relX = clientX - svgRect.left;
     const relY = clientY - svgRect.top;
+    
+    // Scale SVG coords
     const scaleX = (VISIBLE_WIDTH * BLOCK_SIZE) / svgRect.width;
     const scaleY = (VISIBLE_HEIGHT * BLOCK_SIZE) / svgRect.height;
+    
     const svgX = relX * scaleX;
     const svgY = relY * scaleY;
 
-    const visX = Math.floor(svgX / BLOCK_SIZE);
+    // Inverse projection for X
+    const rawVisX = getGridXFromScreen(svgX);
+    if (rawVisX < 0) return; // clicked outside cylinder projection
+
+    const visX = Math.floor(rawVisX);
     const visY = Math.floor(svgY / BLOCK_SIZE);
+    
     const gridX = normalizeX(visX + boardOffset);
     const gridY = visY + BUFFER_HEIGHT;
 
@@ -70,27 +116,36 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
     
     // 1. Grid Blocks
     for (let y = BUFFER_HEIGHT; y < BUFFER_HEIGHT + VISIBLE_HEIGHT; y++) {
-      for (let visX = 0; visX < VISIBLE_WIDTH; visX++) {
+      for (let visX = 0; visX <= VISIBLE_WIDTH; visX++) {
         const gridX = normalizeX(visX + boardOffset);
-        const cell = grid[y][gridX];
+        const cell = grid[y][gridX]; // Note: This might read index 12 (VISIBLE_WIDTH) which wraps to valid gridX
         
-        const xPos = visX * BLOCK_SIZE;
+        // Calculate projected Width and X
+        const startX = getScreenX(visX);
+        const endX = getScreenX(visX + 1);
+        const cellWidth = endX - startX;
+        
+        // Skip invalid projections (edges)
+        if (isNaN(startX) || isNaN(cellWidth)) continue;
+
         const yPos = (y - BUFFER_HEIGHT) * BLOCK_SIZE;
         
-        // Background Grid
-        elements.push(
-            <rect
-              key={`bg-${y}-${visX}`}
-              x={xPos}
-              y={yPos}
-              width={BLOCK_SIZE}
-              height={BLOCK_SIZE}
-              fill={(gridX + y) % 2 === 0 ? COLORS.GRID_BG : COLORS.GRID_EMPTY}
-              opacity={0.3}
-            />
-        );
+        // Background Grid (only render up to VISIBLE_WIDTH - 1)
+        if (visX < VISIBLE_WIDTH) {
+             elements.push(
+                <rect
+                  key={`bg-${y}-${visX}`}
+                  x={startX}
+                  y={yPos}
+                  width={cellWidth}
+                  height={BLOCK_SIZE}
+                  fill={(gridX + y) % 2 === 0 ? COLORS.GRID_BG : COLORS.GRID_EMPTY}
+                  opacity={0.3}
+                />
+            );
+        }
 
-        if (cell) {
+        if (cell && visX < VISIBLE_WIDTH) {
             // Check Neighbors
             const topSame = y > 0 && grid[y-1][gridX]?.groupId === cell.groupId;
             const bottomSame = y < TOTAL_HEIGHT-1 && grid[y+1][gridX]?.groupId === cell.groupId;
@@ -98,54 +153,50 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
             const rightSame = grid[y][normalizeX(gridX+1)]?.groupId === cell.groupId;
 
             // Fill Logic
-            // DURATION depends on group size
             const totalDuration = BASE_FILL_DURATION + (cell.groupSize * PER_BLOCK_DURATION);
-            
             const groupHeight = (cell.groupMaxY - cell.groupMinY + 1);
             const indexFromBottom = cell.groupMaxY - y;
-            
             const segmentDuration = totalDuration / groupHeight;
             const startDelay = indexFromBottom * segmentDuration;
-            
-            // Sync logic
             const animDelay = (cell.timestamp + startDelay) - now;
 
-            // Base Fill (Transparent/Faint)
-            // Note: Key includes timestamp to force re-render/animation restart on merge
             elements.push(
                 <g key={`cell-${cell.id}-${cell.timestamp}`} className={cell.timestamp + totalDuration < now ? "glow-anim" : ""}>
                     <rect
-                        x={xPos}
+                        x={startX}
                         y={yPos}
-                        width={BLOCK_SIZE}
+                        width={cellWidth}
                         height={BLOCK_SIZE}
                         fill={cell.color}
                         fillOpacity={0.1}
                     />
                     
-                    {/* Animated Fill Meter */}
-                    <svg x={xPos} y={yPos} width={BLOCK_SIZE} height={BLOCK_SIZE}>
-                        <rect 
-                            className="fill-anim"
-                            x={0} 
-                            y={0} 
-                            width="100%" 
-                            height="100%" 
-                            fill={cell.color} 
-                            fillOpacity={0.8}
-                            transform="rotate(180, 15, 15)" 
-                            style={{ 
-                                animationDuration: `${segmentDuration}ms`,
-                                animationDelay: `${animDelay}ms`
-                            }} 
-                        />
-                    </svg>
+                    {/* For animated fill, we use a clip path to handle the variable width */}
+                    <clipPath id={`clip-${cell.id}-${y}-${visX}`}>
+                        <rect x={startX} y={yPos} width={cellWidth} height={BLOCK_SIZE} />
+                    </clipPath>
+
+                    <rect 
+                        className="fill-anim"
+                        x={startX} 
+                        y={yPos} 
+                        width={cellWidth} 
+                        height={BLOCK_SIZE} 
+                        fill={cell.color} 
+                        fillOpacity={0.8}
+                        transform={`rotate(180, ${startX + cellWidth/2}, ${yPos + BLOCK_SIZE/2})`}
+                        clipPath={`url(#clip-${cell.id}-${y}-${visX})`}
+                        style={{ 
+                            animationDuration: `${segmentDuration}ms`,
+                            animationDelay: `${animDelay}ms`
+                        }} 
+                    />
 
                     {/* Borders */}
-                    {!topSame && <line x1={xPos} y1={yPos} x2={xPos+BLOCK_SIZE} y2={yPos} stroke={cell.color} strokeWidth="2" />}
-                    {!bottomSame && <line x1={xPos} y1={yPos+BLOCK_SIZE} x2={xPos+BLOCK_SIZE} y2={yPos+BLOCK_SIZE} stroke={cell.color} strokeWidth="2" />}
-                    {!leftSame && <line x1={xPos} y1={yPos} x2={xPos} y2={yPos+BLOCK_SIZE} stroke={cell.color} strokeWidth="2" />}
-                    {!rightSame && <line x1={xPos+BLOCK_SIZE} y1={yPos} x2={xPos+BLOCK_SIZE} y2={yPos+BLOCK_SIZE} stroke={cell.color} strokeWidth="2" />}
+                    {!topSame && <line x1={startX} y1={yPos} x2={startX+cellWidth} y2={yPos} stroke={cell.color} strokeWidth="2" />}
+                    {!bottomSame && <line x1={startX} y1={yPos+BLOCK_SIZE} x2={startX+cellWidth} y2={yPos+BLOCK_SIZE} stroke={cell.color} strokeWidth="2" />}
+                    {!leftSame && <line x1={startX} y1={yPos} x2={startX} y2={yPos+BLOCK_SIZE} stroke={cell.color} strokeWidth="2" />}
+                    {!rightSame && <line x1={startX+cellWidth} y1={yPos} x2={startX+cellWidth} y2={yPos+BLOCK_SIZE} stroke={cell.color} strokeWidth="2" />}
                 </g>
             );
         }
@@ -154,34 +205,34 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
     
     // 2. Falling Blocks
     fallingBlocks.forEach((block) => {
-        // Only render if within visible buffer range
-        if (block.y < BUFFER_HEIGHT - 1) return; // -1 for smoothness entering top
+        if (block.y < BUFFER_HEIGHT - 1) return; 
 
         let visX = block.x - boardOffset;
         if (visX > TOTAL_WIDTH / 2) visX -= TOTAL_WIDTH;
         if (visX < -TOTAL_WIDTH / 2) visX += TOTAL_WIDTH;
         
         if (visX >= 0 && visX < VISIBLE_WIDTH) {
-             const xPos = visX * BLOCK_SIZE;
+             const startX = getScreenX(visX);
+             const endX = getScreenX(visX + 1);
+             const cellWidth = endX - startX;
              const yPos = (block.y - BUFFER_HEIGHT) * BLOCK_SIZE;
              
              elements.push(
                  <g key={`falling-${block.data.id}`}>
                     <rect
-                        x={xPos}
+                        x={startX}
                         y={yPos}
-                        width={BLOCK_SIZE}
+                        width={cellWidth}
                         height={BLOCK_SIZE}
                         fill="none"
                         stroke={block.data.color}
                         strokeWidth="3"
                         rx="2"
                     />
-                    {/* Inner detail for style */}
                     <rect
-                        x={xPos + 6}
+                        x={startX + (cellWidth * 0.2)}
                         y={yPos + 6}
-                        width={BLOCK_SIZE - 12}
+                        width={cellWidth * 0.6}
                         height={BLOCK_SIZE - 12}
                         fill={block.data.color}
                         fillOpacity="0.3"
@@ -207,15 +258,17 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
             if (visX < -TOTAL_WIDTH / 2) visX += TOTAL_WIDTH;
 
             if (visX >= -2 && visX < VISIBLE_WIDTH + 2) {
-                 const xPos = visX * BLOCK_SIZE;
+                 const startX = getScreenX(visX);
+                 const endX = getScreenX(visX + 1);
+                 const cellWidth = endX - startX;
                  const yPos = (pieceGridY - BUFFER_HEIGHT) * BLOCK_SIZE;
                  
                  elements.push(
                    <rect
                      key={`ghost-${idx}`}
-                     x={xPos}
+                     x={startX}
                      y={yPos}
-                     width={BLOCK_SIZE}
+                     width={cellWidth}
                      height={BLOCK_SIZE}
                      fill="none"
                      stroke={activePiece.definition.color}
@@ -242,15 +295,17 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
         if (visX < -TOTAL_WIDTH / 2) visX += TOTAL_WIDTH;
 
         if (visX >= -2 && visX < VISIBLE_WIDTH + 2) {
-             const xPos = visX * BLOCK_SIZE;
+             const startX = getScreenX(visX);
+             const endX = getScreenX(visX + 1);
+             const cellWidth = endX - startX;
              const yPos = (pieceGridY - BUFFER_HEIGHT) * BLOCK_SIZE;
              
              elements.push(
                <rect
                  key={`piece-${idx}`}
-                 x={xPos}
+                 x={startX}
                  y={yPos}
-                 width={BLOCK_SIZE}
+                 width={cellWidth}
                  height={BLOCK_SIZE}
                  fill={activePiece.definition.color}
                  fillOpacity="0.2" 
@@ -286,14 +341,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
             </defs>
             {renderCells}
         </svg>
-
-        {/* Cylinder Gradient Overlay */}
-        <div 
-          className="absolute inset-0 pointer-events-none z-10"
-          style={{
-             background: 'linear-gradient(90deg, rgba(15,23,42,0.85) 0%, rgba(15,23,42,0) 25%, rgba(15,23,42,0) 75%, rgba(15,23,42,0.85) 100%)'
-          }}
-        />
     </div>
   );
 };

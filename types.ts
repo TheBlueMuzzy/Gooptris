@@ -48,6 +48,20 @@ export interface FallingBlock {
   velocity: number;
 }
 
+export interface ScoreBreakdown {
+    base: number;
+    height: number;
+    offscreen: number;
+    adjacency: number;
+    speed: number;
+}
+
+export interface GameStats {
+    startTime: number;
+    totalBonusTime: number;
+    maxGroupSize: number;
+}
+
 export interface GameState {
   grid: GridCell[][]; // [y][x]
   boardOffset: number; // 0-TOTAL_WIDTH
@@ -62,4 +76,8 @@ export interface GameState {
   combo: number;
   fallingBlocks: FallingBlock[];
   timeLeft: number;
+  
+  // New Stats
+  scoreBreakdown: ScoreBreakdown;
+  gameStats: GameStats;
 }

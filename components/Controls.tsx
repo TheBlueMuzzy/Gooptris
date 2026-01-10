@@ -1,7 +1,7 @@
 import React from 'react';
 import { GameState, PieceDefinition } from '../types';
 import { SCORE_THRESHOLD } from '../constants';
-import { RefreshCw, Skull, Clock } from 'lucide-react';
+import { RefreshCw, Skull, Clock, Home } from 'lucide-react';
 
 interface ControlsProps {
   state: GameState;
@@ -18,7 +18,7 @@ interface ControlsProps {
 export const Controls: React.FC<ControlsProps> = ({ 
   state, onTapLeft, onTapRight, onSwipeUp, onSwipeDown, onSwipeLeft, onSwipeRight, onRestart, onExit 
 }) => {
-  const { score, storedPiece, gameOver, combo, cellsCleared, timeLeft } = state;
+  const { score, gameOver, combo, cellsCleared, timeLeft, scoreBreakdown, gameStats } = state;
 
   // Touch handling
   const touchStart = React.useRef<{x: number, y: number} | null>(null);
@@ -68,76 +68,112 @@ export const Controls: React.FC<ControlsProps> = ({
   // Meter Progress
   const progress = (score % SCORE_THRESHOLD) / SCORE_THRESHOLD;
 
+  // Final Stats Calculation
+  const finalTimeSeconds = Math.floor((Date.now() - (gameStats.startTime || Date.now())) / 1000);
+  const bonusTimeSeconds = Math.floor(gameStats.totalBonusTime / 1000);
+
   return (
     <>
-      {/* HUD Layer */}
-      <div className="absolute top-4 left-4 right-4 flex justify-between items-start pointer-events-none z-10">
-        <div className="flex flex-col gap-2 w-full max-w-[200px]">
-            <div className={`bg-slate-900/90 p-3 rounded-lg border backdrop-blur transition-colors ${isLowTime ? 'border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.2)]' : 'border-slate-700'}`}>
-                <div className="flex justify-between items-baseline mb-2">
-                    <div className="flex items-baseline gap-3">
-                        <span className="text-xs text-slate-400 uppercase font-bold tracking-wider">Score</span>
-                        <span className="text-2xl font-mono text-cyan-400 leading-none">{score.toLocaleString()}</span>
-                    </div>
-                    
-                    <div className={`flex items-center gap-1.5 ${isLowTime ? 'text-red-400 animate-pulse' : 'text-slate-300'}`}>
-                         <Clock className="w-3.5 h-3.5" />
-                         <span className="text-lg font-mono font-bold">{seconds}s</span>
-                    </div>
-                </div>
-                
-                {/* 10k Progress Meter */}
-                <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden border border-slate-700/50">
-                    <div 
-                        className={`h-full transition-all duration-300 ${isLowTime ? 'bg-red-500' : 'bg-gradient-to-r from-cyan-600 to-cyan-400'}`}
-                        style={{ width: `${progress * 100}%` }}
-                    />
-                </div>
-                
-                {combo > 1 && <div className="text-xs text-yellow-400 animate-pulse mt-1 font-bold tracking-wider text-center">COMBO x{combo}</div>}
-            </div>
-        </div>
+      {/* HUD Layer - Stretched across top, z-50 to sit above vignettes */}
+      <div className="absolute top-0 left-0 right-0 p-3 pointer-events-none z-50">
+          <div className={`w-full bg-slate-900/95 p-3 rounded-xl border backdrop-blur-md shadow-2xl transition-colors flex flex-col gap-2 ${isLowTime ? 'border-red-500/50 shadow-red-900/20' : 'border-slate-700/80 shadow-black/50'}`}>
+              
+              <div className="flex justify-between items-end px-2">
+                  <div className="flex flex-col">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-0.5">Score</span>
+                      <span className="text-3xl font-mono text-cyan-400 leading-none tracking-tight shadow-cyan-500/10 drop-shadow-sm">{score.toLocaleString()}</span>
+                  </div>
+                  
+                  {combo > 1 && <div className="text-lg text-yellow-400 animate-bounce font-black tracking-wider text-center px-4">x{combo} COMBO</div>}
 
-        {/* Hold (Currently Hidden/Locked) */}
-        {/* 
-        <div className="flex flex-col items-end">
-            <div className="bg-slate-900/80 p-3 rounded-lg border border-slate-700 backdrop-blur flex flex-col items-center min-w-[80px]">
-                <div className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-2">Hold</div>
-                <div className="w-12 h-12 flex items-center justify-center bg-slate-800 rounded-md">
-                   {storedPiece ? (
-                       <PiecePreview piece={storedPiece} />
-                   ) : <span className="text-slate-600 text-xs">EMPTY</span>}
-                </div>
-                <div className="mt-1 text-[10px] text-slate-500">SWIPE UP</div>
-            </div>
-        </div>
-        */}
+                  <div className="flex flex-col items-end">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-0.5">Time</span>
+                      <div className={`flex items-baseline gap-1 ${isLowTime ? 'text-red-400 animate-pulse' : 'text-slate-200'}`}>
+                          <Clock className="w-3 h-3 opacity-70" />
+                          <span className="text-2xl font-mono font-bold leading-none">{seconds}s</span>
+                      </div>
+                  </div>
+              </div>
+              
+              {/* 10k Progress Meter */}
+              <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden border border-slate-700/50 relative">
+                  <div 
+                      className={`h-full transition-all duration-300 ${isLowTime ? 'bg-red-500' : 'bg-gradient-to-r from-cyan-600 to-cyan-400'}`}
+                      style={{ width: `${progress * 100}%` }}
+                  />
+              </div>
+          </div>
       </div>
 
       {/* Game Over Screen */}
       {gameOver && (
-        <div className="absolute inset-0 bg-slate-950/90 z-50 flex flex-col items-center justify-center p-8 backdrop-blur-sm animate-in fade-in duration-300">
-           <Skull className="w-16 h-16 text-red-500 mb-4 animate-bounce" />
-           <h1 className="text-4xl font-bold text-white mb-2 tracking-tighter">GAME OVER</h1>
-           <p className="text-slate-400 mb-8">{timeLeft <= 0 ? "Time's Up" : "System Failure"}</p>
-           
-           <div className="bg-slate-800 p-6 rounded-xl w-full max-w-xs mb-8 border border-slate-700">
-             <div className="flex justify-between items-center mb-2">
-                <span className="text-slate-400">Final Score</span>
-                <span className="text-2xl text-cyan-400 font-mono">{score.toLocaleString()}</span>
-             </div>
-             <div className="flex justify-between items-center">
-                <span className="text-slate-400">Cells Cleared</span>
-                <span className="text-xl text-white font-mono">{cellsCleared}</span>
-             </div>
-           </div>
+        <div className="absolute inset-0 bg-slate-950/95 z-[60] flex flex-col items-center justify-center p-6 backdrop-blur-md animate-in fade-in duration-300 overflow-y-auto">
+           <div className="flex flex-col items-center w-full max-w-sm gap-6 my-auto">
+               <div className="text-center">
+                   <Skull className="w-12 h-12 text-red-500 mx-auto mb-2 animate-bounce" />
+                   <h1 className="text-4xl font-black text-white tracking-tighter mb-1">GAME OVER</h1>
+                   <p className="text-slate-400 font-mono text-sm tracking-widest">{timeLeft <= 0 ? "TEMPORAL FAILURE" : "SYSTEM CRITICAL"}</p>
+               </div>
+               
+               <div className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl">
+                    <div className="text-center mb-6">
+                        <div className="text-xs text-slate-500 uppercase tracking-widest mb-1">Final Score</div>
+                        <div className="text-4xl font-mono text-cyan-400 font-bold">{score.toLocaleString()}</div>
+                    </div>
 
-           <button 
-             onClick={onExit}
-             className="px-8 py-4 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg shadow-lg shadow-cyan-900/50 transition-all active:scale-95 flex items-center gap-2"
-           >
-             <RefreshCw className="w-5 h-5" /> REBOOT
-           </button>
+                    <div className="grid grid-cols-2 gap-4 mb-6">
+                         <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-center">
+                            <div className="text-[10px] text-slate-500 uppercase">Play Time</div>
+                            <div className="text-lg text-slate-200 font-mono">
+                                {finalTimeSeconds}s 
+                                <span className="text-xs text-green-400 ml-1">(+{bonusTimeSeconds}s)</span>
+                            </div>
+                         </div>
+                         <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-center">
+                            <div className="text-[10px] text-slate-500 uppercase">Max Chain</div>
+                            <div className="text-lg text-slate-200 font-mono">{gameStats.maxGroupSize} Units</div>
+                         </div>
+                    </div>
+
+                    <div className="space-y-2 text-xs font-mono border-t border-slate-800 pt-4">
+                        <div className="flex justify-between text-slate-400">
+                            <span>Block Clears</span>
+                            <span className="text-slate-200">{Math.floor(scoreBreakdown.base).toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-400">
+                            <span>Height Bonus</span>
+                            <span className="text-slate-200">{Math.floor(scoreBreakdown.height).toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-400">
+                            <span>Off-screen Bonus</span>
+                            <span className="text-slate-200">{Math.floor(scoreBreakdown.offscreen).toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-400">
+                            <span>Adjacency Bonus</span>
+                            <span className="text-slate-200">{Math.floor(scoreBreakdown.adjacency).toLocaleString()}</span>
+                        </div>
+                         <div className="flex justify-between text-slate-400">
+                            <span>Speed Bonus</span>
+                            <span className="text-slate-200">{Math.floor(scoreBreakdown.speed).toLocaleString()}</span>
+                        </div>
+                    </div>
+               </div>
+
+               <div className="flex gap-3 w-full">
+                   <button 
+                     onClick={onExit}
+                     className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl border border-slate-700 transition-all active:scale-95 flex items-center justify-center gap-2"
+                   >
+                     <Home className="w-5 h-5" /> MENU
+                   </button>
+                   <button 
+                     onClick={onRestart}
+                     className="flex-[2] py-4 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl shadow-lg shadow-cyan-900/50 transition-all active:scale-95 flex items-center justify-center gap-2"
+                   >
+                     <RefreshCw className="w-5 h-5" /> REBOOT
+                   </button>
+               </div>
+           </div>
         </div>
       )}
 
@@ -149,25 +185,9 @@ export const Controls: React.FC<ControlsProps> = ({
       />
       
       {/* Desktop Hints */}
-      <div className="absolute bottom-4 left-0 right-0 text-center text-slate-500 text-xs pointer-events-none hidden md:block opacity-50">
+      <div className="absolute bottom-4 left-0 right-0 text-center text-slate-500 text-xs pointer-events-none hidden md:block opacity-50 z-50">
         ARROWS / WASD to Move &bull; Q/E to Rotate &bull; SPACE to Slam
       </div>
     </>
   );
 };
-
-const PiecePreview: React.FC<{ piece: PieceDefinition }> = ({ piece }) => {
-    // Simple SVG preview
-    return (
-        <svg viewBox="-2.5 -2.5 5 5" width="40" height="40">
-             {piece.cells.map((c, i) => (
-                 <polygon 
-                    key={i}
-                    points="0,-0.57 0.5,0.28 -0.5,0.28" // Approx triangle
-                    transform={`translate(${c.x * 0.5}, ${c.y * 0.866}) rotate(${ (c.x + c.y)%2===0 ? 0 : 180 })`}
-                    fill={piece.color}
-                 />
-             ))}
-        </svg>
-    )
-}
