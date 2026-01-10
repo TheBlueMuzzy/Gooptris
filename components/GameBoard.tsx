@@ -14,41 +14,48 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
   const { grid, boardOffset, activePiece, fallingBlocks } = state;
 
   // --- CYLINDRICAL PROJECTION LOGIC ---
-  // The visible area represents 1/3 of the cylinder (120 degrees).
-  // We map the linear grid x (0..VISIBLE_WIDTH) to a sine-wave distorted x.
+  // We simulate a cylinder with a circumference based on TOTAL_WIDTH blocks.
+  // We project this cylinder onto a flat screen centered within the SVG viewbox.
+  // Requirement: Blocks at the center of the screen (angle=0) must be square (1:1 aspect ratio).
+  // This implies the scale factor at the center is 1.0 (Projected Width = Arc Length).
   
-  // Total visible width in pixels
-  const VIEW_WIDTH_PX = VISIBLE_WIDTH * BLOCK_SIZE;
-  const CENTER_X_PX = VIEW_WIDTH_PX / 2;
-  const RADIUS = VIEW_WIDTH_PX / (2 * Math.sin(Math.PI / 3)); // Chord length formula inverse
+  // Physical Geometry
+  const ANGLE_PER_COL = (2 * Math.PI) / TOTAL_WIDTH; // ~12 degrees per column
+  // Radius required such that arc_length_of_one_block = BLOCK_SIZE
+  // BLOCK_SIZE = R * ANGLE_PER_COL  =>  R = BLOCK_SIZE / ANGLE_PER_COL
+  const CYL_RADIUS = BLOCK_SIZE / ANGLE_PER_COL; // ~143.2 px
+
+  // Viewport
+  const CANVAS_WIDTH = VISIBLE_WIDTH * BLOCK_SIZE;
+  const CANVAS_CENTER = CANVAS_WIDTH / 2;
 
   // Map grid column index (float) to Screen X pixel position
   const getScreenX = (visX: number) => {
-      // Normalize visX to -1..1 range relative to center
-      const normalizedPos = (visX - (VISIBLE_WIDTH / 2)) / (VISIBLE_WIDTH / 2);
+      // visX is grid index relative to the visible window (0..12).
+      // Center of window is at VISIBLE_WIDTH / 2.
+      const centerCol = VISIBLE_WIDTH / 2;
+      const offsetFromCenter = visX - centerCol;
       
-      // Angle coverage: -60deg to +60deg (total 120deg)
-      const angle = normalizedPos * (Math.PI / 3);
+      // Calculate angle on cylinder
+      const angle = offsetFromCenter * ANGLE_PER_COL;
       
-      // Projected X onto the flat screen plane (sine of angle)
-      // We map angle -60..60 to screen width
-      const projectedX = Math.sin(angle) * RADIUS;
+      // Project: x = R * sin(angle)
+      const projectedX = CYL_RADIUS * Math.sin(angle);
       
-      return CENTER_X_PX + projectedX;
+      return CANVAS_CENTER + projectedX;
   };
 
   // Inverse: Screen X to Grid Column (for clicks)
   const getGridXFromScreen = (screenX: number) => {
-      const relativeX = screenX - CENTER_X_PX;
-      const ratio = relativeX / RADIUS;
-      // Clamp for safety
-      if (ratio < -1 || ratio > 1) return -1;
+      const relX = screenX - CANVAS_CENTER;
       
-      const angle = Math.asin(ratio);
-      const normalizedPos = angle / (Math.PI / 3);
+      // relX = R * sin(angle) -> angle = asin(relX / R)
+      // Clamp to range [-1, 1] to avoid NaN
+      const sinVal = Math.max(-1, Math.min(1, relX / CYL_RADIUS));
+      const angle = Math.asin(sinVal);
       
-      const visX = (normalizedPos * (VISIBLE_WIDTH / 2)) + (VISIBLE_WIDTH / 2);
-      return visX;
+      const offsetFromCenter = angle / ANGLE_PER_COL;
+      return (VISIBLE_WIDTH / 2) + offsetFromCenter;
   };
 
   const handleBoardClick = useCallback((e: React.MouseEvent<SVGSVGElement> | React.TouchEvent<SVGSVGElement>) => {
@@ -75,7 +82,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
 
     // Inverse projection for X
     const rawVisX = getGridXFromScreen(svgX);
-    if (rawVisX < 0) return; // clicked outside cylinder projection
+    if (rawVisX < 0) return; // safety check
 
     const visX = Math.floor(rawVisX);
     const visY = Math.floor(svgY / BLOCK_SIZE);
@@ -125,8 +132,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
         const endX = getScreenX(visX + 1);
         const cellWidth = endX - startX;
         
-        // Skip invalid projections (edges)
-        if (isNaN(startX) || isNaN(cellWidth)) continue;
+        // Skip invalid projections (edges or backfaces if angle > 90)
+        // With current settings (12 cols view), max angle is 72 deg, so always visible.
+        if (cellWidth <= 0) continue;
 
         const yPos = (y - BUFFER_HEIGHT) * BLOCK_SIZE;
         
@@ -162,6 +170,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
 
             elements.push(
                 <g key={`cell-${cell.id}-${cell.timestamp}`} className={cell.timestamp + totalDuration < now ? "glow-anim" : ""}>
+                    {/* Main Color Block */}
                     <rect
                         x={startX}
                         y={yPos}
@@ -171,7 +180,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
                         fillOpacity={0.1}
                     />
                     
-                    {/* For animated fill, we use a clip path to handle the variable width */}
+                    {/* Animated Fill Meter */}
                     <clipPath id={`clip-${cell.id}-${y}-${visX}`}>
                         <rect x={startX} y={yPos} width={cellWidth} height={BLOCK_SIZE} />
                     </clipPath>

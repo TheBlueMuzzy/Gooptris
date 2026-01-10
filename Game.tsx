@@ -267,10 +267,7 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
     if (!checkCollision(grid, tempPiece, newOffset)) {
       setBoardOffset(newOffset);
       setActivePiece(tempPiece);
-      // Reset lock timer on successful move to allow infinite spin/slide
-      if (lockStartTimeRef.current !== null) {
-          lockStartTimeRef.current = Date.now();
-      }
+      // Lock timer is NOT reset on move to prevent infinite stalling
     }
   }, [boardOffset, activePiece, grid, gameOver, isPaused, countdown]);
 
@@ -289,10 +286,7 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
         const kickedPiece = { ...tempPiece, x: normalizeX(tempPiece.x + kick.x), y: tempPiece.y + kick.y };
         if (!checkCollision(grid, kickedPiece, boardOffset)) {
             setActivePiece(kickedPiece);
-            // Reset lock timer on successful rotate
-            if (lockStartTimeRef.current !== null) {
-                lockStartTimeRef.current = Date.now();
-            }
+            // Lock timer is NOT reset on rotate
             return;
         }
     }
@@ -453,7 +447,6 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
                       
                       if (elapsed > LOCK_DELAY_MS) {
                           // === TIME EXPIRED: LOCK PIECE ===
-                          // Use the current piece position (which might be snapped)
                           
                           // Speed Score logic
                           const now = Date.now();
@@ -466,18 +459,6 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
                               if (ratio < 1) {
                                   speedBonus = Math.ceil(5 * (1 - ratio));
                               }
-                              // We use functional update in setScore, but here we just need to fire the stats update
-                              // Note: We need to do this carefully inside the loop
-                              // For simplicity we call the hook function which is stable
-                              // But we need to be careful about state access. 
-                              // Since updateScoreAndStats is a callback, it's fine.
-                              // However, we can't easily call it from here without triggering React warning or stale closure if not careful.
-                              // But we are in useEffect with empty deps, so updateScoreAndStats is from the initial render...
-                              // Actually updateScoreAndStats IS in the deps list of other effects but not this one. 
-                              // Use the stateRef pattern or direct setScore.
-                              // For now, we skip the speed bonus calculation inside the loop to avoid closure complexity, 
-                              // or we assume it's negligible for auto-lock.
-                              // (Speed bonus is mostly for fast play/slamming anyway).
                           }
 
                           setCombo(0);
@@ -511,7 +492,7 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
                           
                           lockStartTimeRef.current = null;
                       }
-                      // Else: we wait. Piece stays at activePiece.y. Player can move.
+                      // Else: we wait. Piece stays at activePiece.y. Player can move but timer keeps ticking.
                       
                   } else {
                       // No collision, falling freely
