@@ -74,6 +74,9 @@ export const Controls: React.FC<ControlsProps> = ({
 
   return (
     <>
+      {/* Vignette Layer */}
+      <div className="absolute inset-0 z-30 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_40%,rgba(0,0,0,0.75)_100%)]" />
+
       {/* HUD Layer - Stretched across top, z-50 to sit above vignettes */}
       <div className="absolute top-0 left-0 right-0 p-3 pointer-events-none z-50">
           <div className={`w-full bg-slate-900/95 p-3 rounded-xl border backdrop-blur-md shadow-2xl transition-colors flex flex-col gap-2 ${isLowTime ? 'border-red-500/50 shadow-red-900/20' : 'border-slate-700/80 shadow-black/50'}`}>

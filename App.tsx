@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import Game from './Game';
+import { Game } from './Game';
 import { MainMenu } from './components/MainMenu';
 import { Upgrades } from './components/Upgrades';
 import { Settings } from './components/Settings';
