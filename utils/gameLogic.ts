@@ -38,17 +38,16 @@ export const checkCollision = (grid: GridCell[][], piece: ActivePiece, boardOffs
     // Floor Check:
     // A block at y spans [y, y+1).
     // It hits the floor if the bottom edge (y + 1) is > TOTAL_HEIGHT.
-    // Use a small epsilon to handle float precision issues at the boundary.
     if (y + 1 > TOTAL_HEIGHT) return true; 
     
     // Grid Cell Check:
     // We must check all integer grid rows that this block overlaps.
     // A block at y spans [y, y+1).
-    // It overlaps row R if the interval [y, y+1) intersects [R, R+1).
-    // This is effectively rows floor(y) through floor(y + 1 - epsilon).
+    // Using a slightly more permissive epsilon (0.01) allows for microscopic overlaps 
+    // without triggering collision, preventing "sticky" movement.
     
     const rStart = Math.floor(y);
-    const rEnd = Math.floor(y + 1 - 0.0001);
+    const rEnd = Math.floor(y + 1 - 0.01);
 
     for (let r = rStart; r <= rEnd; r++) {
         if (r >= 0 && r < TOTAL_HEIGHT) {
@@ -60,11 +59,18 @@ export const checkCollision = (grid: GridCell[][], piece: ActivePiece, boardOffs
 };
 
 export const getGhostY = (grid: GridCell[][], piece: ActivePiece, boardOffset: number): number => {
-  let y = Math.floor(piece.y);
+  // Start search strictly from the floor of the current position
+  const startY = Math.floor(piece.y);
+  let y = startY;
+
+  // Search downwards for the first invalid position
   while (!checkCollision(grid, { ...piece, y: y + 1 }, boardOffset)) {
     y += 1;
   }
-  return y;
+  
+  // Safety: Ensure we never return a ghost position 'above' the current floor 
+  // (though the loop logic starting at startY guarantees this naturally).
+  return Math.max(startY, y);
 };
 
 export const findContiguousGroup = (grid: GridCell[][], startX: number, startY: number): Coordinate[] => {
@@ -95,7 +101,6 @@ export const findContiguousGroup = (grid: GridCell[][], startX: number, startY: 
     for (const n of neighbors) {
       if (n.y >= 0 && n.y < TOTAL_HEIGHT) {
         const neighborCell = grid[n.y][n.x];
-        // Match by group ID for clearing logic, assuming groups are correctly maintained
         if (neighborCell && neighborCell.groupId === targetGroupId) {
            if (!visited.has(`${n.x},${n.y}`)) {
              queue.push(n);
@@ -216,10 +221,6 @@ export const getFloatingBlocks = (grid: GridCell[][]): { grid: GridCell[][], fal
     const newGrid = grid.map(row => [...row]);
     const falling: FallingBlock[] = [];
     const isSupported = new Set<string>();
-    
-    // Strict Vertical Gravity
-    // Blocks are only supported if they are on the floor or on top of another supported block.
-    // Lateral adjacency does NOT provide support during this phase.
     
     let changed = true;
     while (changed) {

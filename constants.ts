@@ -15,7 +15,7 @@ export const COMBO_BONUS = 50;
 // 10000 = 25m + c
 // 9000 = 24m -> m = 375
 // 1000 = 375 + c -> c = 625
-export const BASE_FILL_DURATION = 625; // Base time
+export const BASE_FILL_DURATION = 0; // Base time
 export const PER_BLOCK_DURATION = 375;  // Extra time per block in group
 
 // Timer Constants
