@@ -14,44 +14,49 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
   const { grid, boardOffset, activePiece, fallingBlocks } = state;
 
   // --- CYLINDRICAL PROJECTION LOGIC ---
-  // We simulate a cylinder with a circumference based on TOTAL_WIDTH blocks.
-  // We project this cylinder onto a flat screen centered within the SVG viewbox.
-  // Requirement: Blocks at the center of the screen (angle=0) must be square (1:1 aspect ratio).
-  // This implies the scale factor at the center is 1.0 (Projected Width = Arc Length).
   
   // Physical Geometry
-  const ANGLE_PER_COL = (2 * Math.PI) / TOTAL_WIDTH; // ~12 degrees per column
-  // Radius required such that arc_length_of_one_block = BLOCK_SIZE
-  // BLOCK_SIZE = R * ANGLE_PER_COL  =>  R = BLOCK_SIZE / ANGLE_PER_COL
-  const CYL_RADIUS = BLOCK_SIZE / ANGLE_PER_COL; // ~143.2 px
+  const ANGLE_PER_COL = (2 * Math.PI) / TOTAL_WIDTH; 
+  const CYL_RADIUS = BLOCK_SIZE / ANGLE_PER_COL; 
 
-  // Viewport
-  const CANVAS_WIDTH = VISIBLE_WIDTH * BLOCK_SIZE;
-  const CANVAS_CENTER = CANVAS_WIDTH / 2;
+  // Viewport / Coordinate System
+  // We establish a coordinate system where 0 is the center of the cylinder projection
+  const CANVAS_CENTER_X = 0; 
+  
+  // Calculate the projected bounds of the visible area
+  // Visible columns are 0 to VISIBLE_WIDTH (exclusive, so 0..12 edges)
+  // Left Edge (col 0) -> Angle -6
+  // Right Edge (col 12) -> Angle +6
+  // The angles are relative to the center column (VISIBLE_WIDTH / 2)
+  const maxAngle = (VISIBLE_WIDTH / 2) * ANGLE_PER_COL;
+  
+  // Projected max width from center
+  const projectedHalfWidth = CYL_RADIUS * Math.sin(maxAngle);
+  
+  // ViewBox Definitions
+  const vbX = -projectedHalfWidth;
+  const vbY = 0;
+  const vbW = projectedHalfWidth * 2;
+  const vbH = VISIBLE_HEIGHT * BLOCK_SIZE;
 
   // Map grid column index (float) to Screen X pixel position
   const getScreenX = (visX: number) => {
-      // visX is grid index relative to the visible window (0..12).
-      // Center of window is at VISIBLE_WIDTH / 2.
+      // visX relative to center of visible window
       const centerCol = VISIBLE_WIDTH / 2;
       const offsetFromCenter = visX - centerCol;
-      
-      // Calculate angle on cylinder
       const angle = offsetFromCenter * ANGLE_PER_COL;
       
-      // Project: x = R * sin(angle)
-      const projectedX = CYL_RADIUS * Math.sin(angle);
-      
-      return CANVAS_CENTER + projectedX;
+      // x = R * sin(angle) (relative to 0 center)
+      return CYL_RADIUS * Math.sin(angle);
   };
 
   // Inverse: Screen X to Grid Column (for clicks)
   const getGridXFromScreen = (screenX: number) => {
-      const relX = screenX - CANVAS_CENTER;
+      // screenX is already centered around 0 in our logic, but coming from raw click it needs transform
+      // This helper expects screenX in the ViewBox coordinate space (where 0 is center)
       
-      // relX = R * sin(angle) -> angle = asin(relX / R)
-      // Clamp to range [-1, 1] to avoid NaN
-      const sinVal = Math.max(-1, Math.min(1, relX / CYL_RADIUS));
+      // x = R * sin(angle) -> angle = asin(x/R)
+      const sinVal = Math.max(-1, Math.min(1, screenX / CYL_RADIUS));
       const angle = Math.asin(sinVal);
       
       const offsetFromCenter = angle / ANGLE_PER_COL;
@@ -73,16 +78,14 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
     const relX = clientX - svgRect.left;
     const relY = clientY - svgRect.top;
     
-    // Scale SVG coords
-    const scaleX = (VISIBLE_WIDTH * BLOCK_SIZE) / svgRect.width;
-    const scaleY = (VISIBLE_HEIGHT * BLOCK_SIZE) / svgRect.height;
-    
-    const svgX = relX * scaleX;
-    const svgY = relY * scaleY;
+    // Map pixels to ViewBox coordinates
+    // viewBox X starts at vbX, width is vbW
+    const svgX = vbX + (relX / svgRect.width) * vbW;
+    const svgY = vbY + (relY / svgRect.height) * vbH;
 
     // Inverse projection for X
     const rawVisX = getGridXFromScreen(svgX);
-    if (rawVisX < 0) return; // safety check
+    if (rawVisX < 0) return; 
 
     const visX = Math.floor(rawVisX);
     const visY = Math.floor(svgY / BLOCK_SIZE);
@@ -93,7 +96,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
     if (visX >= 0 && visX < VISIBLE_WIDTH && visY >= 0 && visY < VISIBLE_HEIGHT) {
         onBlockTap(gridX, gridY);
     }
-  }, [boardOffset, onBlockTap]);
+  }, [boardOffset, onBlockTap, vbX, vbY, vbW, vbH]);
 
   // CSS for fill animation
   const style = useMemo(() => `
@@ -125,15 +128,13 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
     for (let y = BUFFER_HEIGHT; y < BUFFER_HEIGHT + VISIBLE_HEIGHT; y++) {
       for (let visX = 0; visX <= VISIBLE_WIDTH; visX++) {
         const gridX = normalizeX(visX + boardOffset);
-        const cell = grid[y][gridX]; // Note: This might read index 12 (VISIBLE_WIDTH) which wraps to valid gridX
+        const cell = grid[y][gridX]; 
         
         // Calculate projected Width and X
         const startX = getScreenX(visX);
         const endX = getScreenX(visX + 1);
         const cellWidth = endX - startX;
         
-        // Skip invalid projections (edges or backfaces if angle > 90)
-        // With current settings (12 cols view), max angle is 72 deg, so always visible.
         if (cellWidth <= 0) continue;
 
         const yPos = (y - BUFFER_HEIGHT) * BLOCK_SIZE;
@@ -330,16 +331,16 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
     }
 
     return elements;
-  }, [grid, boardOffset, activePiece, fallingBlocks, now]);
+  }, [grid, boardOffset, activePiece, fallingBlocks, now, vbX, vbY, vbW, vbH]);
 
   return (
-    <div className="w-full max-w-md aspect-[1/2] bg-slate-950 relative shadow-2xl border-4 border-slate-800 rounded-lg overflow-hidden select-none">
+    <div className="w-full h-full bg-slate-950 relative shadow-2xl border-x-4 border-slate-800 overflow-hidden select-none">
         <style>{style}</style>
         <svg 
             width="100%" 
             height="100%"
-            viewBox={`0 0 ${VISIBLE_WIDTH * BLOCK_SIZE} ${VISIBLE_HEIGHT * BLOCK_SIZE}`}
-            preserveAspectRatio="xMidYMid meet"
+            viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`}
+            preserveAspectRatio="xMidYMin meet"
             onClick={handleBoardClick}
         >
              <defs>
