@@ -248,7 +248,7 @@ export const getFloatingBlocks = (grid: GridCell[][]): { grid: GridCell[][], fal
     const queue: {x: number, y: number}[] = [];
     const lastRow = TOTAL_HEIGHT - 1;
 
-    // 1. Mark all bottom-row blocks as grounded
+    // 1. Initial Grounding: Floor
     for (let x = 0; x < TOTAL_WIDTH; x++) {
         if (grid[lastRow][x] !== null) {
             const key = `${x},${lastRow}`;
@@ -257,30 +257,47 @@ export const getFloatingBlocks = (grid: GridCell[][]): { grid: GridCell[][], fal
         }
     }
 
-    // 2. BFS to find all connected supported blocks
+    // 2. BFS for Support
     let head = 0;
     while(head < queue.length) {
         const {x, y} = queue[head++];
-        
+        const currentBlock = grid[y][x]!;
+
+        // Rule A: Support blocks Resting ON TOP (Gravity support)
+        // A block at (y) supports a block at (y-1) regardless of group/color
+        const aboveY = y - 1;
+        if (aboveY >= 0 && grid[aboveY][x] !== null) {
+            const key = `${x},${aboveY}`;
+            if (!grounded.has(key)) {
+                grounded.add(key);
+                queue.push({x, y: aboveY});
+            }
+        }
+
+        // Rule B: Sticky Support (Same Group) in all directions
+        // A block supports neighbors if they belong to the SAME group (sticky)
         const neighbors = [
             {x: normalizeX(x + 1), y},
             {x: normalizeX(x - 1), y},
-            {x, y: y - 1}, // Above
-            {x, y: y + 1}  // Below
+            {x, y: y + 1}, // Below (hanging piece of same group)
+            // {x, y: y - 1} // Above is covered by Rule A, but redundant check is fine
         ];
 
         for (const n of neighbors) {
             if (n.y >= 0 && n.y < TOTAL_HEIGHT) {
-                const key = `${n.x},${n.y}`;
-                if (grid[n.y][n.x] !== null && !grounded.has(key)) {
-                    grounded.add(key);
-                    queue.push(n);
+                const nBlock = grid[n.y][n.x];
+                if (nBlock !== null) {
+                     const key = `${n.x},${n.y}`;
+                     if (!grounded.has(key) && nBlock.groupId === currentBlock.groupId) {
+                         grounded.add(key);
+                         queue.push(n);
+                     }
                 }
             }
         }
     }
 
-    // 3. Separate ungrounded blocks into FallingBlock array
+    // 3. Separate ungrounded blocks
     const newGrid = grid.map(row => [...row]);
     const falling: FallingBlock[] = [];
 

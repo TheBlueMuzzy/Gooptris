@@ -298,7 +298,8 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
     const finalY = getGhostY(grid, activePiece, boardOffset);
     const slammedPiece = { ...activePiece, y: finalY };
     
-    const newGrid = mergePiece(grid, slammedPiece);
+    const mergedGrid = mergePiece(grid, slammedPiece);
+    const { grid: finalGrid, falling: newFalling } = getFloatingBlocks(mergedGrid);
     
     const now = Date.now();
     const dropDistance = finalY - activePiece.startSpawnY;
@@ -315,7 +316,9 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
     }
     
     setCombo(0);
-    setGrid(newGrid);
+    setGrid(finalGrid);
+    setFallingBlocks(prev => [...prev, ...newFalling]);
+
     setActivePiece(null);
     spawnNewPiece();
     
@@ -463,7 +466,8 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
                           }
 
                           setCombo(0);
-                          const newGrid = mergePiece(grid, activePiece);
+                          const mergedGrid = mergePiece(grid, activePiece);
+                          const { grid: finalGrid, falling: newFalling } = getFloatingBlocks(mergedGrid);
                           
                           const nextDef = PIECES[Math.floor(Math.random() * PIECES.length)];
                           const nextColor = GAME_COLORS[Math.floor(Math.random() * GAME_COLORS.length)];
@@ -477,12 +481,13 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
                                startSpawnY: 1
                            };
     
-                           setGrid(newGrid);
+                           setGrid(finalGrid);
+                           setFallingBlocks(prev => [...prev, ...newFalling]);
                            
                            const isDownHeld = heldKeys.current.has('ArrowDown') || heldKeys.current.has('KeyS');
                            setIsSoftDropping(isDownHeld);
     
-                           if (checkCollision(newGrid, newPiece, boardOffset)) {
+                           if (checkCollision(finalGrid, newPiece, boardOffset)) {
                                setGameOver(true);
                                gameOverRef.current = true;
                                setActivePiece(null);
