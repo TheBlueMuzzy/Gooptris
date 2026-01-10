@@ -1,13 +1,14 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { GameState, GridCell, ActivePiece, PieceDefinition, PieceType, FallingBlock, ScoreBreakdown, GameStats } from './types';
-import { TOTAL_WIDTH, TOTAL_HEIGHT, VISIBLE_WIDTH, VISIBLE_HEIGHT, BASE_FILL_DURATION, PER_BLOCK_DURATION, PIECES, INITIAL_TIME_MS, SCORE_THRESHOLD, TIME_BONUS_MS, BUFFER_HEIGHT } from './constants';
+import { TOTAL_WIDTH, TOTAL_HEIGHT, VISIBLE_WIDTH, VISIBLE_HEIGHT, BASE_FILL_DURATION, PER_BLOCK_DURATION, GAME_COLORS, PIECES, INITIAL_TIME_MS, SCORE_THRESHOLD, TIME_BONUS_MS } from './constants';
 import { 
     spawnPiece, checkCollision, mergePiece, getRotatedCells, normalizeX, findContiguousGroup, 
-    getGhostY, updateFallingBlocks, getFloatingBlocks, updateGroups,
+    updateGroups, getGhostY, updateFallingBlocks, getFloatingBlocks,
     calculateHeightBonus, calculateOffScreenBonus, calculateMultiplier, calculateAdjacencyBonus 
 } from './utils/gameLogic';
 import { GameBoard } from './components/GameBoard';
 import { Controls } from './components/Controls';
+import { Play, RotateCcw, Home } from 'lucide-react';
 
 const INITIAL_SPEED = 800; // ms per block
 const MIN_SPEED = 100;
@@ -21,7 +22,7 @@ interface GameProps {
   onExit: () => void;
 }
 
-export const Game: React.FC<GameProps> = ({ onExit }) => {
+const Game: React.FC<GameProps> = ({ onExit }) => {
   const [grid, setGrid] = useState<GridCell[][]>(createGrid());
   const [activePiece, setActivePiece] = useState<ActivePiece | null>(null);
   const [storedPiece, setStoredPiece] = useState<PieceDefinition | null>(null);
@@ -56,15 +57,6 @@ export const Game: React.FC<GameProps> = ({ onExit }) => {
   const stateRef = useRef({ 
       activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown 
   });
-
-  // Update ref when state changes
-  useEffect(() => {
-    stateRef.current = { 
-        activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown 
-    };
-    gameOverRef.current = gameOver;
-    isPausedRef.current = isPaused;
-  }, [activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown]);
 
   useEffect(() => {
     startNewGame();
@@ -125,6 +117,19 @@ export const Game: React.FC<GameProps> = ({ onExit }) => {
     piece.y = 1; 
     piece.startSpawnY = 1;
     setActivePiece(piece);
+
+    stateRef.current = {
+        activePiece: piece,
+        grid: newGrid,
+        boardOffset: newOffset,
+        gameOver: false,
+        isPaused: false,
+        gameSpeed: INITIAL_SPEED,
+        isSoftDropping: false,
+        fallingBlocks: [],
+        timeLeft: INITIAL_TIME_MS,
+        countdown: 3
+    };
   };
 
   const spawnNewPiece = (pieceDef?: PieceDefinition) => {
@@ -182,18 +187,9 @@ export const Game: React.FC<GameProps> = ({ onExit }) => {
 
      const now = Date.now();
      const totalDuration = BASE_FILL_DURATION + (cell.groupSize * PER_BLOCK_DURATION);
-     
-     // Calculate requirement per individual block segment to match visualization
-     const groupHeight = (cell.groupMaxY - cell.groupMinY + 1);
-     const segmentDuration = totalDuration / groupHeight;
-     const indexFromBottom = cell.groupMaxY - y;
-     
-     // Time required for THIS specific cell to be filled
-     // Matching the logic in GameBoard.tsx which enables glow when this segment is full
-     const requiredTime = (indexFromBottom + 1) * segmentDuration;
      const elapsed = now - (cell.timestamp || 0); 
      
-     if (elapsed < requiredTime) {
+     if (!(elapsed >= totalDuration)) {
          return;
      }
 
@@ -280,285 +276,351 @@ export const Game: React.FC<GameProps> = ({ onExit }) => {
     if (activePiece.definition.type === PieceType.O) return;
 
     const currentRot = activePiece.rotation;
-    const newRot = (currentRot + (clockwise ? 1 : 3)) % 4;
-    const newCells = getRotatedCells(activePiece.cells, clockwise);
-
-    // Wall Kicks (Simplified: Try center, then right, then left, then up)
-    const kicks = [
-        {x: 0, y: 0},
-        {x: 1, y: 0},
-        {x: -1, y: 0},
-        {x: 0, y: -1}, // Kick up if at bottom
-        {x: 1, y: -1},
-        {x: -1, y: -1}
-    ];
+    const nextRot = (currentRot + (clockwise ? 1 : -1) + 4) % 4;
+    const nextCells = getRotatedCells(activePiece.cells, clockwise);
+    
+    const tempPiece = { ...activePiece, cells: nextCells, rotation: nextRot };
+    const kicks = [{x:0, y:0}, {x:1, y:0}, {x:-1, y:0}, {x:0, y:-1}, {x:1, y:-1}, {x:-1, y:-1}, {x:2, y:0}, {x:-2, y:0}];
 
     for (const kick of kicks) {
-        const testPiece = {
-            ...activePiece,
-            rotation: newRot,
-            cells: newCells,
-            x: normalizeX(activePiece.x + kick.x),
-            y: activePiece.y + kick.y
-        };
-
-        if (!checkCollision(grid, testPiece, boardOffset)) {
-            setActivePiece(testPiece);
-            lockStartTimeRef.current = null; // Reset lock delay on successful rotation
+        const kickedPiece = { ...tempPiece, x: normalizeX(tempPiece.x + kick.x), y: tempPiece.y + kick.y };
+        if (!checkCollision(grid, kickedPiece, boardOffset)) {
+            setActivePiece(kickedPiece);
+            // Lock timer is NOT reset on rotate
             return;
         }
     }
-  }, [activePiece, grid, gameOver, isPaused, countdown, boardOffset]);
+  }, [activePiece, grid, boardOffset, gameOver, isPaused, countdown]);
 
-  const hardDrop = useCallback(() => {
+  const slamPiece = useCallback(() => {
     if (gameOver || isPaused || !activePiece || countdown !== null) return;
-
-    const y = getGhostY(grid, activePiece, boardOffset);
-    const droppedPiece = { ...activePiece, y };
-
-    const newGrid = mergePiece(grid, droppedPiece);
-    const { grid: finalGrid, falling: newFalling } = getFloatingBlocks(newGrid);
     
-    // Score for hard drop: 2 * distance
-    const distance = Math.floor(y - activePiece.y);
-    updateScoreAndStats(distance * 2, { speed: distance * 2 });
-
+    const finalY = getGhostY(grid, activePiece, boardOffset);
+    const slammedPiece = { ...activePiece, y: finalY };
+    
+    const mergedGrid = mergePiece(grid, slammedPiece);
+    const { grid: finalGrid, falling: newFalling } = getFloatingBlocks(mergedGrid);
+    
+    const now = Date.now();
+    const dropDistance = finalY - activePiece.startSpawnY;
+    if (dropDistance > 0) {
+        const expectedTime = dropDistance * gameSpeed;
+        const actualTime = now - activePiece.spawnTimestamp;
+        const ratio = actualTime / expectedTime;
+        
+        let speedBonus = 0;
+        if (ratio < 1) {
+            speedBonus = Math.ceil(5 * (1 - ratio));
+        }
+        updateScoreAndStats(speedBonus, { speed: speedBonus });
+    }
+    
+    setCombo(0);
     setGrid(finalGrid);
     setFallingBlocks(prev => [...prev, ...newFalling]);
+
+    setActivePiece(null);
     spawnNewPiece();
-  }, [activePiece, grid, gameOver, isPaused, countdown, boardOffset, updateScoreAndStats]);
+    
+    // Explicitly clear lock timer on slam
+    lockStartTimeRef.current = null;
+    
+    const isDownHeld = heldKeys.current.has('ArrowDown') || heldKeys.current.has('KeyS');
+    setIsSoftDropping(isDownHeld);
+  }, [activePiece, grid, boardOffset, gameOver, isPaused, countdown, gameSpeed, updateScoreAndStats]);
+
+  const swapPiece = useCallback(() => {
+      if (gameOver || isPaused || !activePiece || !canSwap || countdown !== null) return;
+      const currentDef = activePiece.definition;
+      const nextDef = storedPiece;
+      
+      setStoredPiece(currentDef);
+      lockStartTimeRef.current = null; // Reset timer on swap
+      
+      if (nextDef) {
+          const newPiece = { 
+            ...activePiece, 
+            definition: nextDef, 
+            cells: [...nextDef.cells], 
+            rotation: 0,
+            spawnTimestamp: Date.now(), // Reset timing on swap
+            startSpawnY: 1
+          };
+          newPiece.x = normalizeX(boardOffset + Math.floor((VISIBLE_WIDTH - 1) / 2));
+          newPiece.y = 1;
+
+          if (!checkCollision(grid, newPiece, boardOffset)) {
+              setActivePiece(newPiece);
+              setCanSwap(false);
+          }
+      } else {
+          setStoredPiece(currentDef);
+          spawnNewPiece();
+          setCanSwap(false);
+      }
+  }, [activePiece, storedPiece, grid, boardOffset, gameOver, isPaused, canSwap, countdown]);
 
   // --- Game Loop ---
-
-  const gameLoop = useCallback((time: number) => {
-    if (!lastTimeRef.current) lastTimeRef.current = time;
-    const dt = time - lastTimeRef.current;
-    lastTimeRef.current = time;
-
-    const state = stateRef.current;
-    if (state.gameOver || state.isPaused || state.countdown !== null) {
-         requestAnimationFrame(gameLoop);
-         return;
-    }
-
-    // 1. Update Timer
-    setTimeLeft(prev => Math.max(0, prev - dt));
-    if (state.timeLeft <= 0) {
-        setGameOver(true);
-        return;
-    }
-
-    // 2. Falling Blocks Physics
-    if (state.fallingBlocks.length > 0) {
-        const { active, landed } = updateFallingBlocks(state.fallingBlocks, state.grid, dt, state.gameSpeed);
-        
-        if (landed.length > 0) {
-            // Merge landed blocks into grid
-            const newGrid = state.grid.map(row => [...row]);
-            let landUpdates = false;
-            
-            landed.forEach(b => {
-                if (b.y >= 0 && b.y < TOTAL_HEIGHT) {
-                    newGrid[Math.floor(b.y)][b.x] = b.data;
-                    landUpdates = true;
-                }
-            });
-
-            if (landUpdates) {
-                 // Check for merges or group updates after landing
-                 const groupedGrid = updateGroups(newGrid);
-                 setGrid(groupedGrid);
-                 
-                 // If landing caused further instability (rare but possible), it will be caught next frame
-                 const { grid: nextGrid, falling: nextFalling } = getFloatingBlocks(groupedGrid);
-                 setGrid(nextGrid);
-                 setFallingBlocks([...active, ...nextFalling]);
-            } else {
-                 setFallingBlocks(active);
-            }
-        } else {
-            setFallingBlocks(active);
-        }
-    }
-
-    // 3. Active Piece Gravity
-    if (state.activePiece) {
-        const gravitySpeed = state.isSoftDropping 
-            ? state.gameSpeed / SOFT_DROP_FACTOR 
-            : state.gameSpeed;
-            
-        // Convert speed (ms/block) to velocity (blocks/ms) -> blocks = ms * (1/speed)
-        const moveAmount = dt / gravitySpeed;
-        
-        const nextY = state.activePiece.y + moveAmount;
-        const nextPiece = { ...state.activePiece, y: nextY };
-        
-        if (checkCollision(state.grid, nextPiece, state.boardOffset)) {
-            // Collision Detected: Snap to integer or slide?
-            // Revert Y to floor(y) of collision? 
-            // Better: Check if we can move down at all.
-            // If we are stuck, start lock timer.
-            
-            if (lockStartTimeRef.current === null) {
-                lockStartTimeRef.current = Date.now();
-            }
-
-            const lockedTime = Date.now() - lockStartTimeRef.current;
-            if (lockedTime > LOCK_DELAY_MS) {
-                // Lock it
-                const finalPiece = { ...state.activePiece, y: Math.floor(state.activePiece.y) };
-                // Double check collision on final spot (rare bug prevention)
-                if (checkCollision(state.grid, finalPiece, state.boardOffset)) {
-                    // Try one up if needed
-                    finalPiece.y -= 1;
-                }
-                
-                const newGrid = mergePiece(state.grid, finalPiece);
-                const { grid: finalGrid, falling: newFalling } = getFloatingBlocks(newGrid);
-                
-                setGrid(finalGrid);
-                setFallingBlocks(prev => [...prev, ...newFalling]);
-                spawnNewPiece();
-            }
-            // Else: visual slide time (do nothing to Y, let it float at collision point?)
-            // Actually usually we clamp Y to floor so it doesn't vibrate
-            // But for smooth slide, we just don't increment Y.
-        } else {
-            // No collision, apply gravity
-            setActivePiece(nextPiece);
-            lockStartTimeRef.current = null; // Reset lock if we fell successfully
-        }
-    }
-
-    requestAnimationFrame(gameLoop);
-  }, []);
-
+  
+  useEffect(() => { 
+      stateRef.current = { activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown }; 
+  }, [activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown]);
+  
   useEffect(() => {
-    const handle = requestAnimationFrame(gameLoop);
-    return () => cancelAnimationFrame(handle);
-  }, [gameLoop]);
+      let requestID: number;
+      
+      // Initialize time
+      lastTimeRef.current = performance.now();
 
-  // --- Input Handling ---
+      const animate = (time: number) => {
+          const dt = time - lastTimeRef.current;
+          lastTimeRef.current = time;
 
+          const { gameSpeed, grid, activePiece, boardOffset, isSoftDropping, fallingBlocks, timeLeft, countdown } = stateRef.current;
+          
+          if (countdown !== null) {
+              lastTimeRef.current = time;
+              requestID = requestAnimationFrame(animate);
+              return;
+          }
+
+          if (!gameOverRef.current && !isPausedRef.current) {
+              
+              const newTimeLeft = timeLeft - dt;
+              if (newTimeLeft <= 0) {
+                  setTimeLeft(0);
+                  setGameOver(true);
+                  gameOverRef.current = true;
+                  return; 
+              } else {
+                  setTimeLeft(newTimeLeft);
+              }
+
+              if (fallingBlocks.length > 0) {
+                  const { active, landed } = updateFallingBlocks(fallingBlocks, grid, dt, gameSpeed);
+                  
+                  if (landed.length > 0) {
+                      const nextGrid = grid.map(row => [...row]);
+                      landed.forEach(b => {
+                          if (nextGrid[b.y][b.x] === null) {
+                              nextGrid[b.y][b.x] = b.data;
+                          }
+                      });
+                      const finalizedGrid = updateGroups(nextGrid);
+                      setGrid(finalizedGrid);
+                      setFallingBlocks(active);
+                  } else {
+                      setFallingBlocks(active);
+                  }
+              }
+
+              if (activePiece) {
+                  let effectiveSpeed = gameSpeed;
+                  if (isSoftDropping) {
+                      effectiveSpeed = Math.max(16, gameSpeed / SOFT_DROP_FACTOR);
+                  }
+                  
+                  const speed = 1 / effectiveSpeed;
+                  let dy = Math.min(speed * dt, 0.9); 
+                  
+                  const nextY = activePiece.y + dy;
+                  
+                  // Check collision for the next frame
+                  const nextPiece = { ...activePiece, y: nextY };
+                  
+                  if (checkCollision(grid, nextPiece, boardOffset)) {
+                      // Collision detected: We are hitting the floor or a block
+                      
+                      // 1. Visual Snap: Try to land on the integer grid line if possible
+                      // This ensures the piece looks grounded while sliding
+                      const floorY = Math.floor(nextY);
+                      if (floorY > activePiece.y) {
+                          const snapPiece = { ...activePiece, y: floorY };
+                          if (!checkCollision(grid, snapPiece, boardOffset)) {
+                              setActivePiece(snapPiece);
+                          }
+                      }
+
+                      // 2. Lock Delay Logic
+                      if (lockStartTimeRef.current === null) {
+                          lockStartTimeRef.current = Date.now();
+                      }
+                      
+                      const elapsed = Date.now() - lockStartTimeRef.current;
+                      const effectiveLockDelay = isSoftDropping ? 0 : LOCK_DELAY_MS;
+                      
+                      if (elapsed > effectiveLockDelay) {
+                          // === TIME EXPIRED: LOCK PIECE ===
+                          
+                          // Speed Score logic
+                          const now = Date.now();
+                          const dropDistance = activePiece.y - activePiece.startSpawnY;
+                          if (dropDistance > 0) {
+                              const expectedTime = dropDistance * gameSpeed;
+                              const actualTime = now - activePiece.spawnTimestamp;
+                              const ratio = actualTime / expectedTime;
+                              let speedBonus = 0;
+                              if (ratio < 1) {
+                                  speedBonus = Math.ceil(5 * (1 - ratio));
+                              }
+                          }
+
+                          setCombo(0);
+                          const mergedGrid = mergePiece(grid, activePiece);
+                          const { grid: finalGrid, falling: newFalling } = getFloatingBlocks(mergedGrid);
+                          
+                          const nextDef = PIECES[Math.floor(Math.random() * PIECES.length)];
+                          const nextColor = GAME_COLORS[Math.floor(Math.random() * GAME_COLORS.length)];
+                          const newPiece = { 
+                               definition: { ...nextDef, color: nextColor },
+                               x: normalizeX(boardOffset + Math.floor((VISIBLE_WIDTH - 1) / 2)),
+                               y: 1,
+                               rotation: 0,
+                               cells: nextDef.cells,
+                               spawnTimestamp: Date.now(),
+                               startSpawnY: 1
+                           };
+    
+                           setGrid(finalGrid);
+                           setFallingBlocks(prev => [...prev, ...newFalling]);
+                           
+                           const isDownHeld = heldKeys.current.has('ArrowDown') || heldKeys.current.has('KeyS');
+                           setIsSoftDropping(isDownHeld);
+    
+                           if (checkCollision(finalGrid, newPiece, boardOffset)) {
+                               setGameOver(true);
+                               gameOverRef.current = true;
+                               setActivePiece(null);
+                           } else {
+                               setActivePiece(newPiece);
+                               setCanSwap(true);
+                           }
+                          
+                          lockStartTimeRef.current = null;
+                      }
+                      // Else: we wait. Piece stays at activePiece.y. Player can move but timer keeps ticking.
+                      
+                  } else {
+                      // No collision, falling freely
+                      setActivePiece(nextPiece);
+                      lockStartTimeRef.current = null; // Reset lock timer if we become airborne
+                  }
+              }
+          }
+          requestID = requestAnimationFrame(animate);
+      };
+      
+      requestID = requestAnimationFrame(animate);
+      return () => cancelAnimationFrame(requestID);
+  }, []); 
+
+  // Keyboard
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-        if (heldKeys.current.has(e.code)) return;
-        heldKeys.current.add(e.code);
+      const handleKeyDown = (e: KeyboardEvent) => {
+          heldKeys.current.add(e.code);
 
-        if (countdown !== null) return;
-        
-        switch (e.code) {
-            case 'ArrowLeft':
-            case 'KeyA':
-                moveBoard(-1);
-                break;
-            case 'ArrowRight':
-            case 'KeyD':
-                moveBoard(1);
-                break;
-            case 'ArrowUp':
-            case 'KeyW':
-                // Maybe quick drop or rotate? Standard is rotate or hard drop.
-                // Let's use Up for Rotate CW
-                rotatePiece(true);
-                break;
-            case 'KeyQ':
-                rotatePiece(false);
-                break;
-            case 'KeyE':
-                rotatePiece(true);
-                break;
-            case 'ArrowDown':
-            case 'KeyS':
-                setIsSoftDropping(true);
-                break;
-            case 'Space':
-                hardDrop();
-                break;
-            case 'KeyP':
-                setIsPaused(p => !p);
-                break;
-            case 'Escape':
-                if (isPaused) {
-                    onExit();
-                } else {
-                    setIsPaused(true);
-                }
-                break;
-        }
-    };
+          if (e.key === 'Escape') {
+              setIsPaused(prev => {
+                  const newVal = !prev;
+                  isPausedRef.current = newVal;
+                  return newVal;
+              });
+              return;
+          }
+          if (gameOver) {
+              if (e.key === 'Enter') startNewGame();
+              return;
+          }
+          if (e.repeat) return;
 
-    const handleKeyUp = (e: KeyboardEvent) => {
-        heldKeys.current.delete(e.code);
-        if (e.code === 'ArrowDown' || e.code === 'KeyS') {
-            setIsSoftDropping(false);
-        }
-    };
+          switch(e.code) {
+              case 'ArrowLeft': case 'KeyA': moveBoard(1); break;
+              case 'ArrowRight': case 'KeyD': moveBoard(-1); break;
+              case 'KeyQ': rotatePiece(false); break;
+              case 'KeyE': case 'ArrowUp': rotatePiece(true); break;
+              case 'ArrowDown': case 'KeyS': 
+                  setIsSoftDropping(true);
+                  break;
+              case 'Space': slamPiece(); break;
+              case 'KeyW': swapPiece(); break;
+          }
+      };
 
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-        window.removeEventListener('keydown', handleKeyDown);
-        window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [moveBoard, rotatePiece, hardDrop, isPaused, countdown, onExit]);
+      const handleKeyUp = (e: KeyboardEvent) => {
+          heldKeys.current.delete(e.code);
+
+          switch(e.code) {
+              case 'ArrowDown': case 'KeyS': 
+                  if (!heldKeys.current.has('ArrowDown') && !heldKeys.current.has('KeyS')) {
+                      setIsSoftDropping(false);
+                  }
+                  break;
+          }
+      };
+
+      window.addEventListener('keydown', handleKeyDown);
+      window.addEventListener('keyup', handleKeyUp);
+      return () => {
+          window.removeEventListener('keydown', handleKeyDown);
+          window.removeEventListener('keyup', handleKeyUp);
+      };
+  }, [moveBoard, rotatePiece, slamPiece, swapPiece, gameOver]);
+
+  const gameState: GameState = {
+      grid, boardOffset, activePiece, storedPiece, score, gameOver, isPaused, canSwap,
+      level: 1, cellsCleared, combo, fallingBlocks, timeLeft, scoreBreakdown, gameStats
+  };
 
   return (
-    <div className="w-full h-full relative bg-slate-900 overflow-hidden">
-        <GameBoard 
-            state={{ 
-                grid, boardOffset, activePiece, storedPiece, score, gameOver, isPaused, canSwap, 
-                level: 1, cellsCleared, combo, fallingBlocks, timeLeft, scoreBreakdown, gameStats 
-            }} 
-            onBlockTap={handleBlockTap}
-        />
-        
-        <Controls 
-            state={{ 
-                grid, boardOffset, activePiece, storedPiece, score, gameOver, isPaused, canSwap, 
-                level: 1, cellsCleared, combo, fallingBlocks, timeLeft, scoreBreakdown, gameStats 
-            }}
-            onTapLeft={() => moveBoard(-1)}
-            onTapRight={() => moveBoard(1)}
-            onSwipeUp={() => hardDrop()} // Hold piece or hard drop?
-            onSwipeDown={() => setIsSoftDropping(true)} // Note: Touch end stops soft drop? Needs better logic for hold
-            onSwipeLeft={() => moveBoard(-1)}
-            onSwipeRight={() => moveBoard(1)}
-            onRestart={startNewGame}
-            onExit={onExit}
-        />
+    <div className="w-full h-full flex flex-col items-center justify-center relative touch-none">
+      <Controls 
+        state={gameState} 
+        onTapLeft={() => rotatePiece(false)}
+        onTapRight={() => rotatePiece(true)}
+        onSwipeLeft={() => moveBoard(1)}
+        onSwipeRight={() => moveBoard(-1)}
+        onSwipeUp={() => swapPiece()}
+        onSwipeDown={() => slamPiece()}
+        onRestart={startNewGame}
+        onExit={onExit}
+      />
 
-        {/* Pause Overlay */}
-        {isPaused && !gameOver && (
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center">
-                <div className="bg-slate-800 p-8 rounded-2xl border border-slate-700 shadow-2xl text-center">
-                    <h2 className="text-3xl font-black text-white mb-6">PAUSED</h2>
-                    <div className="flex flex-col gap-3">
-                        <button 
-                            onClick={() => setIsPaused(false)}
-                            className="px-6 py-3 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg"
-                        >
-                            RESUME
-                        </button>
-                        <button 
-                            onClick={onExit}
-                            className="px-6 py-3 bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold rounded-lg"
-                        >
-                            EXIT TO MENU
-                        </button>
-                    </div>
-                </div>
-            </div>
-        )}
+      {countdown !== null && !gameOver && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in">
+              <div className="text-9xl font-black text-white animate-pulse drop-shadow-[0_0_30px_rgba(34,211,238,0.8)]">
+                  {countdown}
+              </div>
+          </div>
+      )}
 
-        {/* Countdown Overlay */}
-        {countdown !== null && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none">
-                <div className="text-9xl font-black text-white animate-ping drop-shadow-[0_0_30px_rgba(255,255,255,0.8)]">
-                    {countdown}
-                </div>
-            </div>
-        )}
+      {isPaused && !gameOver && (
+        <div className="absolute inset-0 bg-slate-950/80 z-40 flex flex-col items-center justify-center backdrop-blur-sm gap-6">
+            <h2 className="text-4xl text-cyan-400 font-bold tracking-widest animate-pulse mb-4">PAUSED</h2>
+            <button 
+              onClick={() => { setIsPaused(false); isPausedRef.current = false; }}
+              className="flex items-center gap-3 px-8 py-4 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg shadow-lg shadow-cyan-900/50 transition-all active:scale-95 text-xl"
+            >
+               <Play className="w-6 h-6 fill-current" /> RESUME
+            </button>
+            <button 
+              onClick={startNewGame}
+              className="flex items-center gap-3 px-8 py-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-lg border border-slate-600 transition-all active:scale-95 text-lg"
+            >
+               <RotateCcw className="w-5 h-5" /> RESTART
+            </button>
+            <button 
+              onClick={onExit}
+              className="flex items-center gap-3 px-8 py-4 bg-red-900/50 hover:bg-red-900/80 text-red-200 font-bold rounded-lg border border-red-800 transition-all active:scale-95 text-lg"
+            >
+               <Home className="w-5 h-5" /> EXIT
+            </button>
+        </div>
+      )}
+      
+      <GameBoard state={gameState} onBlockTap={handleBlockTap} />
+      
     </div>
   );
 };
+
+export default Game;

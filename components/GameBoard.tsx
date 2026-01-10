@@ -168,13 +168,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
             const segmentDuration = totalDuration / groupHeight;
             const startDelay = indexFromBottom * segmentDuration;
             const animDelay = (cell.timestamp + startDelay) - now;
-            
-            // Fix: Show glow as soon as THIS specific cell is filled
-            const cellFinishTime = cell.timestamp + startDelay + segmentDuration;
-            const isReady = now >= cellFinishTime;
 
             elements.push(
-                <g key={`cell-${cell.id}-${cell.timestamp}`} className={isReady ? "glow-anim" : ""}>
+                <g key={`cell-${cell.id}-${cell.timestamp}`} className={cell.timestamp + totalDuration < now ? "glow-anim" : ""}>
                     {/* Main Color Block */}
                     <rect
                         x={startX}
