@@ -112,7 +112,6 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettin
                 ? 'bg-red-900/80 border-red-500 text-white shadow-[0_0_15px_rgba(220,38,38,0.5)]' 
                 : 'text-red-900/50 hover:text-red-500 border-transparent hover:border-red-900/50'
             }`}
-            style={{ pointerEvents: 'auto' }}
           >
              {confirmWipe ? <AlertTriangle className="w-3 h-3 animate-pulse" /> : <Trash2 className="w-3 h-3" />}
              {confirmWipe ? "CONFIRM WIPE?" : "WIPE SAVE DATA (TESTING)"}
