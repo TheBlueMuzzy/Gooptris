@@ -19,7 +19,7 @@ export const getScoreForRank = (rank: number): number => {
   // Formula: Base * (Rank^Exponent)
   // Tuned to hit ~17.5M at Rank 100 and ~5k at Rank 2
   const exponent = 1.8; 
-  const base = 4400; 
+  const base = 5000; 
   
   // Offset to make Rank 1 start at 0
   return Math.floor(base * Math.pow(rank - 1, exponent));
