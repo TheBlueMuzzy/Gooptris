@@ -39,7 +39,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettin
         <div className="px-4 py-2">
             <h1 
                 className="text-7xl md:text-9xl text-transparent bg-clip-text bg-gradient-to-b from-green-400 via-green-500 to-green-800 filter drop-shadow-[0_0_25px_rgba(34,197,94,0.6)] text-center pb-4"
-                style={{ fontFamily: '"Rubik Wet Paint", cursive' }}
+                style={{ fontFamily: '"Chewy", cursive' }}
             >
             GOOPTRIS
             </h1>

@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { GameState, GridCell, ActivePiece, PieceDefinition, PieceType, FallingBlock, ScoreBreakdown, GameStats, FloatingText } from './types';
 import { TOTAL_WIDTH, TOTAL_HEIGHT, VISIBLE_WIDTH, VISIBLE_HEIGHT, BASE_FILL_DURATION, PER_BLOCK_DURATION, GAME_COLORS, PIECES, INITIAL_TIME_MS, SCORE_THRESHOLD, TIME_BONUS_MS } from './constants';
 import { 
@@ -49,8 +49,8 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
   const [scoreBreakdown, setScoreBreakdown] = useState<ScoreBreakdown>({ base: 0, height: 0, offscreen: 0, adjacency: 0, speed: 0 });
   const [gameStats, setGameStats] = useState<GameStats>({ startTime: 0, totalBonusTime: 0, maxGroupSize: 0 });
 
-  // Countdown State
-  const [countdown, setCountdown] = useState<number | null>(3);
+  // Countdown State - now just a delay for the start message (2 seconds)
+  const [countdown, setCountdown] = useState<number | null>(2);
   
   // Critical control refs for the game loop
   const gameOverRef = useRef(false);
@@ -138,7 +138,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
     setIsPaused(false);
     isPausedRef.current = false;
     
-    setCountdown(3); 
+    setCountdown(2); 
 
     setStoredPiece(null);
     setCombo(0);
@@ -572,6 +572,19 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
       level: 1, cellsCleared, combo, fallingBlocks, timeLeft, scoreBreakdown, gameStats, floatingTexts
   };
 
+  const animStyle = useMemo(() => `
+    @keyframes popSequence {
+      0% { transform: scale(0); opacity: 0; }
+      15% { transform: scale(1.1); opacity: 1; }
+      20% { transform: scale(1.0); opacity: 1; }
+      90% { transform: scale(1.0); opacity: 1; filter: blur(0px); }
+      100% { transform: scale(1.5); opacity: 0; filter: blur(4px); }
+    }
+    .animate-pop-sequence {
+      animation: popSequence 2s linear forwards;
+    }
+  `, []);
+
   return (
     <div className="w-full h-full flex flex-col items-center justify-center relative touch-none">
       <Controls 
@@ -582,9 +595,13 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
       />
 
       {countdown !== null && !gameOver && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in">
-              <div className="text-9xl font-black text-white animate-pulse drop-shadow-[0_0_30px_rgba(34,211,238,0.8)]">
-                  {countdown}
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in pointer-events-none">
+              <style>{animStyle}</style>
+              <div 
+                className="text-6xl md:text-8xl font-black text-white drop-shadow-[0_0_30px_rgba(34,211,238,0.8)] text-center px-4 leading-tight animate-pop-sequence"
+                style={{ fontFamily: '"Chewy", cursive' }}
+              >
+                  CLEAR OUT<br/><span className="text-cyan-400 text-7xl md:text-9xl">THE GOOP!</span>
               </div>
           </div>
       )}
