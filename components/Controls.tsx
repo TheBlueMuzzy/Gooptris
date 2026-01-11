@@ -72,9 +72,10 @@ export const Controls: React.FC<ControlsProps> = ({
 
   // Detect Level Up during animation
   useEffect(() => {
-      if (currentVisualRankInfo.rank > prevRankRef.current) {
+      const diff = currentVisualRankInfo.rank - prevRankRef.current;
+      if (diff > 0) {
           setLevelUpTrigger(true);
-          setAccumulatedPowerPts(prev => prev + 1);
+          setAccumulatedPowerPts(prev => prev + diff);
           
           const timer = setTimeout(() => setLevelUpTrigger(false), 800);
           
@@ -160,8 +161,9 @@ export const Controls: React.FC<ControlsProps> = ({
                         </div>
                         
                         <div className="w-full h-4 bg-slate-900 rounded-full overflow-hidden border border-slate-700 relative">
+                             {/* REMOVED transition-all/width transition to prevent bar from sliding backwards when wrapping to 0 on level up */}
                              <div 
-                                className={`absolute h-full transition-all duration-75 ease-linear ${levelUpTrigger ? 'bg-yellow-400' : 'bg-green-500'}`}
+                                className={`absolute h-full transition-colors duration-200 ease-out ${levelUpTrigger ? 'bg-yellow-400' : 'bg-green-500'}`}
                                 style={{ width: `${visualBarPercent}%` }}
                              />
                              {/* Gloss */}

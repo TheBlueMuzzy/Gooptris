@@ -60,7 +60,15 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
   
   // We capture this once on mount to ensure the "Before" state for animations is preserved
   // even if the parent component updates the total score immediately on game over.
+  // We use a Ref so it persists across renders without triggering them, but we need to update it manually on restart.
   const initialTotalScoreRef = useRef(initialTotalScore);
+  
+  // Keep track of the latest prop value so startNewGame can access it
+  const latestTotalScorePropRef = useRef(initialTotalScore);
+
+  useEffect(() => {
+    latestTotalScorePropRef.current = initialTotalScore;
+  }, [initialTotalScore]);
 
   const lastTimeRef = useRef<number>(0);
   const heldKeys = useRef<Set<string>>(new Set());
@@ -112,6 +120,10 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
   const startNewGame = useCallback(() => {
     const newGrid = createGrid();
     const newOffset = 0;
+
+    // Update the baseline score for this run to the latest total score from the parent
+    // This ensures that when we finish this new game, the HUD counts up from the correct total
+    initialTotalScoreRef.current = latestTotalScorePropRef.current;
 
     // Force a cycle of the game loop
     setGameId(prev => prev + 1);
