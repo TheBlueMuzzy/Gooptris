@@ -5,7 +5,7 @@ import { MainMenu } from './components/MainMenu';
 import { Upgrades } from './components/Upgrades';
 import { Settings } from './components/Settings';
 import { SaveData } from './types';
-import { loadSaveData, saveGameData, clearSaveData } from './utils/storage';
+import { loadSaveData, saveGameData, clearSaveData, getDefaultSaveData } from './utils/storage';
 import { calculateRankDetails } from './utils/progression';
 
 type ViewState = 'MENU' | 'GAME' | 'UPGRADES' | 'SETTINGS';
@@ -50,6 +50,7 @@ const App: React.FC = () => {
   const handleWipeSave = () => {
     if (window.confirm("WARNING: This will delete all progress, rank, and upgrades. Are you sure?")) {
       clearSaveData();
+      setSaveData(getDefaultSaveData());
     }
   };
 
