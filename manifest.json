@@ -1,16 +1,16 @@
 {
-  "short_name": "Slidetris",
-  "name": "Slidetris: Cylinder Puzzle",
+  "short_name": "Gooptris",
+  "name": "Gooptris: Filtration Defense",
   "icons": [
     {
-      "src": "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/box.svg",
+      "src": "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/droplets.svg",
       "type": "image/svg+xml",
       "sizes": "512x512"
     }
   ],
   "start_url": ".",
   "display": "standalone",
-  "theme_color": "#0f172a",
-  "background_color": "#0f172a",
+  "theme_color": "#052e16",
+  "background_color": "#052e16",
   "orientation": "portrait"
 }

@@ -1,4 +1,3 @@
-
 import { PieceDefinition, PieceType } from './types';
 
 export const VISIBLE_WIDTH = 12; // 12 units wide
@@ -37,8 +36,8 @@ export const COLORS = {
   GREEN: '#22c55e',
   YELLOW: '#eab308',
   
-  GRID_BG: '#1e293b',
-  GRID_EMPTY: '#334155',
+  GRID_BG: '#020617', // Very dark slate (almost black)
+  GRID_EMPTY: '#1e293b', // Dark slate for grid lines
 };
 
 const makePiece = (type: PieceType, coords: number[][]): PieceDefinition => ({

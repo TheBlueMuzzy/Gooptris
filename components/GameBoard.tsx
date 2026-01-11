@@ -9,17 +9,16 @@ interface GameBoardProps {
 }
 
 const BLOCK_SIZE = 30; 
+const RADIUS = 8; // Corner radius for goop blobs
 
 export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
   const { grid, boardOffset, activePiece, fallingBlocks } = state;
 
   // --- CYLINDRICAL PROJECTION LOGIC ---
-  
-  // Physical Geometry
   const ANGLE_PER_COL = (2 * Math.PI) / TOTAL_WIDTH; 
   const CYL_RADIUS = BLOCK_SIZE / ANGLE_PER_COL; 
 
-  // Viewport / Coordinate System
+  // Viewport
   const maxAngle = (VISIBLE_WIDTH / 2) * ANGLE_PER_COL;
   const projectedHalfWidth = CYL_RADIUS * Math.sin(maxAngle);
   
@@ -28,7 +27,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
   const vbW = projectedHalfWidth * 2;
   const vbH = VISIBLE_HEIGHT * BLOCK_SIZE;
 
-  // Map grid column index to Screen X pixel position
   const getScreenX = (visX: number) => {
       const centerCol = VISIBLE_WIDTH / 2;
       const offsetFromCenter = visX - centerCol;
@@ -36,7 +34,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
       return CYL_RADIUS * Math.sin(angle);
   };
 
-  // Inverse: Screen X to Grid Column
   const getGridXFromScreen = (screenX: number) => {
       const sinVal = Math.max(-1, Math.min(1, screenX / CYL_RADIUS));
       const angle = Math.asin(sinVal);
@@ -89,37 +86,83 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
 
   const now = Date.now();
 
+  const getBlobPath = (x: number, y: number, w: number, h: number, neighbors: {t:boolean, r:boolean, b:boolean, l:boolean}) => {
+      // Logic: Start Top-Left. 
+      // If !top and !left, start at (x, y+r) arc to (x+r, y). Else start (x, y).
+      
+      let d = "";
+      
+      // Top Left Corner
+      if (!neighbors.t && !neighbors.l) {
+          d += `M ${x} ${y + RADIUS} Q ${x} ${y} ${x + RADIUS} ${y} `;
+      } else {
+          d += `M ${x} ${y} `;
+      }
+      
+      // Top Edge -> Top Right Corner
+      if (!neighbors.t && !neighbors.r) {
+          d += `L ${x + w - RADIUS} ${y} Q ${x + w} ${y} ${x + w} ${y + RADIUS} `;
+      } else {
+          d += `L ${x + w} ${y} `;
+      }
+
+      // Right Edge -> Bottom Right Corner
+      if (!neighbors.b && !neighbors.r) {
+          d += `L ${x + w} ${y + h - RADIUS} Q ${x + w} ${y + h} ${x + w - RADIUS} ${y + h} `;
+      } else {
+          d += `L ${x + w} ${y + h} `;
+      }
+
+      // Bottom Edge -> Bottom Left Corner
+      if (!neighbors.b && !neighbors.l) {
+          d += `L ${x + RADIUS} ${y + h} Q ${x} ${y + h} ${x} ${y + h - RADIUS} `;
+      } else {
+          d += `L ${x} ${y + h} `;
+      }
+      
+      d += "Z";
+      return d;
+  };
+
   const renderCells = useMemo(() => {
     const elements = [];
     
-    // 1. Grid Blocks
+    // 1. Grid Blocks (Background mesh)
     for (let y = BUFFER_HEIGHT; y < BUFFER_HEIGHT + VISIBLE_HEIGHT; y++) {
       for (let visX = 0; visX <= VISIBLE_WIDTH; visX++) {
         const gridX = normalizeX(visX + boardOffset);
-        const cell = grid[y][gridX]; 
         
         const startX = getScreenX(visX);
         const endX = getScreenX(visX + 1);
         const cellWidth = endX - startX;
         
         if (cellWidth <= 0) continue;
-
         const yPos = (y - BUFFER_HEIGHT) * BLOCK_SIZE;
-        
-        // Background Grid
+
         if (visX < VISIBLE_WIDTH) {
+             // Industrial Mesh Look
              elements.push(
-                <rect
-                  key={`bg-${y}-${visX}`}
-                  x={startX}
-                  y={yPos}
-                  width={cellWidth}
-                  height={BLOCK_SIZE}
-                  fill={(gridX + y) % 2 === 0 ? COLORS.GRID_BG : COLORS.GRID_EMPTY}
-                  opacity={0.3}
-                />
+                <g key={`bg-${y}-${visX}`} opacity={0.2}>
+                    <line x1={startX} y1={yPos} x2={startX+cellWidth} y2={yPos} stroke={COLORS.GRID_EMPTY} strokeWidth="1" />
+                    <line x1={startX} y1={yPos} x2={startX} y2={yPos+BLOCK_SIZE} stroke={COLORS.GRID_EMPTY} strokeWidth="1" />
+                    <circle cx={startX} cy={yPos} r={1} fill={COLORS.GRID_EMPTY} />
+                </g>
             );
         }
+      }
+    }
+
+    // 2. Active Cells (Goop Masses)
+    for (let y = BUFFER_HEIGHT; y < BUFFER_HEIGHT + VISIBLE_HEIGHT; y++) {
+      for (let visX = 0; visX <= VISIBLE_WIDTH; visX++) {
+        const gridX = normalizeX(visX + boardOffset);
+        const cell = grid[y][gridX]; 
+
+        const startX = getScreenX(visX);
+        const endX = getScreenX(visX + 1);
+        const cellWidth = endX - startX;
+        if (cellWidth <= 0) continue;
+        const yPos = (y - BUFFER_HEIGHT) * BLOCK_SIZE;
 
         if (cell && visX < VISIBLE_WIDTH) {
             const topSame = y > 0 && grid[y-1][gridX]?.groupId === cell.groupId;
@@ -127,67 +170,67 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
             const leftSame = grid[y][normalizeX(gridX-1)]?.groupId === cell.groupId;
             const rightSame = grid[y][normalizeX(gridX+1)]?.groupId === cell.groupId;
 
+            const pathData = getBlobPath(startX, yPos, cellWidth, BLOCK_SIZE, {
+                t: topSame, r: rightSame, b: bottomSame, l: leftSame
+            });
+
             // Fill Logic
             const totalDuration = cell.groupSize * PER_BLOCK_DURATION;
             const groupHeight = (cell.groupMaxY - cell.groupMinY + 1);
             const timePerRow = totalDuration / Math.max(1, groupHeight);
-            
-            // Row index from bottom (0 = bottom row of the group)
             const rowIndex = cell.groupMaxY - y; 
-            
             const startDelay = rowIndex * timePerRow;
             const timeSinceStart = now - cell.timestamp;
             const timeIntoRow = timeSinceStart - startDelay;
-
             let fillHeight = 0;
-            if (timeIntoRow >= timePerRow) {
-                fillHeight = BLOCK_SIZE;
-            } else if (timeIntoRow > 0) {
-                fillHeight = (timeIntoRow / timePerRow) * BLOCK_SIZE;
-            }
-
+            if (timeIntoRow >= timePerRow) fillHeight = BLOCK_SIZE;
+            else if (timeIntoRow > 0) fillHeight = (timeIntoRow / timePerRow) * BLOCK_SIZE;
             const isFullyFilled = timeSinceStart >= totalDuration;
 
             elements.push(
                 <g key={`cell-${cell.id}-${cell.timestamp}`} className={isFullyFilled ? "glow-anim" : ""}>
-                    {/* Shell - Outline only (transparent fill) */}
-                    <rect
-                        x={startX}
-                        y={yPos}
-                        width={cellWidth}
-                        height={BLOCK_SIZE}
-                        fill="none" 
-                        stroke="none" 
+                    {/* Outline / Shell */}
+                    <path 
+                        d={pathData} 
+                        fill={cell.color} 
+                        fillOpacity={0.1}
+                        stroke={cell.color} 
+                        strokeWidth="2"
                     />
-                    
-                    {/* Animated Fill Rect */}
+
+                    {/* Animated Fill */}
                     <clipPath id={`clip-${cell.id}-${y}-${visX}`}>
-                        <rect x={startX} y={yPos} width={cellWidth} height={BLOCK_SIZE} />
+                         <path d={pathData} />
                     </clipPath>
 
+                    {/* Masking Rect for fill level */}
                     <rect 
                         x={startX} 
-                        y={yPos} 
+                        y={yPos + (BLOCK_SIZE - fillHeight)} 
                         width={cellWidth} 
                         height={fillHeight} 
                         fill={cell.color} 
-                        fillOpacity={0.8}
-                        transform={`rotate(180, ${startX + cellWidth/2}, ${yPos + BLOCK_SIZE/2})`}
+                        fillOpacity={0.9}
                         clipPath={`url(#clip-${cell.id}-${y}-${visX})`}
                     />
-
-                    {/* Borders - Drawn on top to define the "Shell" */}
-                    {!topSame && <line x1={startX} y1={yPos} x2={startX+cellWidth} y2={yPos} stroke={cell.color} strokeWidth="2" />}
-                    {!bottomSame && <line x1={startX} y1={yPos+BLOCK_SIZE} x2={startX+cellWidth} y2={yPos+BLOCK_SIZE} stroke={cell.color} strokeWidth="2" />}
-                    {!leftSame && <line x1={startX} y1={yPos} x2={startX} y2={yPos+BLOCK_SIZE} stroke={cell.color} strokeWidth="2" />}
-                    {!rightSame && <line x1={startX+cellWidth} y1={yPos} x2={startX+cellWidth} y2={yPos+BLOCK_SIZE} stroke={cell.color} strokeWidth="2" />}
+                    
+                    {/* Highlight/Reflection for Goopiness */}
+                    <path 
+                        d={`M ${startX + 5} ${yPos + 5} Q ${startX + cellWidth/2} ${yPos + 5} ${startX + cellWidth - 5} ${yPos + 5}`}
+                        fill="none"
+                        stroke="white"
+                        strokeWidth="2"
+                        strokeOpacity={0.3}
+                        strokeLinecap="round"
+                        clipPath={`url(#clip-${cell.id}-${y}-${visX})`}
+                    />
                 </g>
             );
         }
       }
     }
     
-    // 2. Falling Blocks
+    // 3. Falling Blocks
     fallingBlocks.forEach((block) => {
         if (block.y < BUFFER_HEIGHT - 1) return; 
 
@@ -208,26 +251,18 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
                         y={yPos}
                         width={cellWidth}
                         height={BLOCK_SIZE}
-                        fill="none"
-                        stroke={block.data.color}
-                        strokeWidth="3"
-                        rx="2"
-                    />
-                    <rect
-                        x={startX + (cellWidth * 0.2)}
-                        y={yPos + 6}
-                        width={cellWidth * 0.6}
-                        height={BLOCK_SIZE - 12}
                         fill={block.data.color}
-                        fillOpacity="0.3"
-                        rx="2"
+                        rx={RADIUS}
+                        stroke="white"
+                        strokeWidth="1"
+                        strokeOpacity={0.5}
                     />
                  </g>
              );
         }
     });
     
-    // 3. Ghost Piece
+    // 4. Ghost Piece
     if (activePiece) {
         const ghostY = getGhostY(grid, activePiece, boardOffset);
         
@@ -258,15 +293,15 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
                      stroke={activePiece.definition.color}
                      strokeWidth="1"
                      strokeDasharray="4 2"
-                     opacity="0.5"
-                     rx="2"
+                     opacity="0.3"
+                     rx={RADIUS}
                    />
                  );
             }
         });
     }
 
-    // 4. Active Piece
+    // 5. Active Piece
     if (activePiece) {
       activePiece.cells.forEach((cell, idx) => {
         const pieceGridX = normalizeX(activePiece.x + cell.x);
@@ -292,12 +327,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
                  width={cellWidth}
                  height={BLOCK_SIZE}
                  fill={activePiece.definition.color}
-                 fillOpacity="0.2" 
                  stroke={activePiece.definition.color}
                  strokeWidth="2"
-                 filter="url(#glow)"
-                 rx="2"
+                 rx={RADIUS}
                  pointerEvents="none"
+                 fillOpacity={0.6}
                />
              );
         }
@@ -308,7 +342,10 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
   }, [grid, boardOffset, activePiece, fallingBlocks, now, vbX, vbY, vbW, vbH]);
 
   return (
-    <div className="w-full h-full bg-slate-950 relative shadow-2xl border-x-4 border-slate-800 overflow-hidden select-none">
+    <div className="w-full h-full bg-slate-950 relative shadow-2xl border-x-4 border-slate-900 overflow-hidden select-none">
+        {/* CRT Scanline Effect Overlay */}
+        <div className="absolute inset-0 pointer-events-none z-10 opacity-10 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))]" style={{backgroundSize: "100% 2px, 3px 100%"}} />
+        
         <style>{style}</style>
         <svg 
             width="100%" 
@@ -317,12 +354,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
             preserveAspectRatio="xMidYMin meet"
             onClick={handleBoardClick}
         >
-             <defs>
-                <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-                    <feGaussianBlur stdDeviation="2" result="blur"/>
-                    <feComposite in="SourceGraphic" in2="blur" operator="over"/>
-                </filter>
-            </defs>
             {renderCells}
         </svg>
     </div>
