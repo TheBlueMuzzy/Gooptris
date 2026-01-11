@@ -1,5 +1,5 @@
 import React, { useMemo, useCallback } from 'react';
-import { GameState } from '../types';
+import { GameState, Coordinate } from '../types';
 import { VISIBLE_WIDTH, VISIBLE_HEIGHT, COLORS, TOTAL_WIDTH, TOTAL_HEIGHT, BUFFER_HEIGHT, PER_BLOCK_DURATION } from '../constants';
 import { normalizeX, getGhostY } from '../utils/gameLogic';
 
@@ -86,42 +86,76 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
 
   const now = Date.now();
 
+  // 1. Fill Path: The closed shape for the color fill (includes rounded corners where appropriate)
   const getBlobPath = (x: number, y: number, w: number, h: number, neighbors: {t:boolean, r:boolean, b:boolean, l:boolean}) => {
-      // Logic: Start Top-Left. 
-      // If !top and !left, start at (x, y+r) arc to (x+r, y). Else start (x, y).
-      
       let d = "";
+      // Top Left
+      if (!neighbors.t && !neighbors.l) d += `M ${x} ${y + RADIUS} Q ${x} ${y} ${x + RADIUS} ${y} `;
+      else d += `M ${x} ${y} `;
       
-      // Top Left Corner
-      if (!neighbors.t && !neighbors.l) {
-          d += `M ${x} ${y + RADIUS} Q ${x} ${y} ${x + RADIUS} ${y} `;
-      } else {
-          d += `M ${x} ${y} `;
-      }
-      
-      // Top Edge -> Top Right Corner
-      if (!neighbors.t && !neighbors.r) {
-          d += `L ${x + w - RADIUS} ${y} Q ${x + w} ${y} ${x + w} ${y + RADIUS} `;
-      } else {
-          d += `L ${x + w} ${y} `;
-      }
+      // Top Right
+      if (!neighbors.t && !neighbors.r) d += `L ${x + w - RADIUS} ${y} Q ${x + w} ${y} ${x + w} ${y + RADIUS} `;
+      else d += `L ${x + w} ${y} `;
 
-      // Right Edge -> Bottom Right Corner
-      if (!neighbors.b && !neighbors.r) {
-          d += `L ${x + w} ${y + h - RADIUS} Q ${x + w} ${y + h} ${x + w - RADIUS} ${y + h} `;
-      } else {
-          d += `L ${x + w} ${y + h} `;
-      }
+      // Bottom Right
+      if (!neighbors.b && !neighbors.r) d += `L ${x + w} ${y + h - RADIUS} Q ${x + w} ${y + h} ${x + w - RADIUS} ${y + h} `;
+      else d += `L ${x + w} ${y + h} `;
 
-      // Bottom Edge -> Bottom Left Corner
-      if (!neighbors.b && !neighbors.l) {
-          d += `L ${x + RADIUS} ${y + h} Q ${x} ${y + h} ${x} ${y + h - RADIUS} `;
-      } else {
-          d += `L ${x} ${y + h} `;
-      }
+      // Bottom Left
+      if (!neighbors.b && !neighbors.l) d += `L ${x + RADIUS} ${y + h} Q ${x} ${y + h} ${x} ${y + h - RADIUS} `;
+      else d += `L ${x} ${y + h} `;
       
       d += "Z";
       return d;
+  };
+
+  // 2. Stroke Path: Disjoint segments for the outer border only (removes internal seams)
+  const getContourPath = (x: number, y: number, w: number, h: number, n: {t:boolean, r:boolean, b:boolean, l:boolean}) => {
+      const r = RADIUS;
+      let d = "";
+
+      // Top Edge
+      if (!n.t) {
+          const start = n.l ? x : x + r;
+          const end = n.r ? x + w : x + w - r;
+          d += `M ${start} ${y} L ${end} ${y} `;
+      }
+      // Right Edge
+      if (!n.r) {
+          const start = n.t ? y : y + r;
+          const end = n.b ? y + h : y + h - r;
+          d += `M ${x + w} ${start} L ${x + w} ${end} `;
+      }
+      // Bottom Edge
+      if (!n.b) {
+          const start = n.l ? x : x + r;
+          const end = n.r ? x + w : x + w - r;
+          d += `M ${end} ${y + h} L ${start} ${y + h} `;
+      }
+      // Left Edge
+      if (!n.l) {
+          const start = n.t ? y : y + r;
+          const end = n.b ? y + h : y + h - r;
+          d += `M ${x} ${end} L ${x} ${start} `;
+      }
+
+      // Corners
+      if (!n.t && !n.l) d += `M ${x} ${y + r} Q ${x} ${y} ${x + r} ${y} `; // TL
+      if (!n.t && !n.r) d += `M ${x + w - r} ${y} Q ${x + w} ${y} ${x + w} ${y + r} `; // TR
+      if (!n.b && !n.r) d += `M ${x + w} ${y + h - r} Q ${x + w} ${y + h} ${x + w - r} ${y + h} `; // BR
+      if (!n.b && !n.l) d += `M ${x + r} ${y + h} Q ${x} ${y + h} ${x} ${y + h - r} `; // BL
+
+      return d;
+  };
+
+  // 3. Highlight: Only on top edge if exposed
+  const getHighlightPath = (x: number, y: number, w: number, n: {t:boolean, l:boolean, r:boolean}) => {
+      if (n.t) return "";
+      const start = n.l ? x + 2 : x + RADIUS;
+      const end = n.r ? x + w - 2 : x + w - RADIUS;
+      const width = end - start;
+      if (width <= 0) return "";
+      return `M ${start} ${y + 5} Q ${start + width/2} ${y + 5} ${end} ${y + 5}`;
   };
 
   const renderCells = useMemo(() => {
@@ -169,10 +203,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
             const bottomSame = y < TOTAL_HEIGHT-1 && grid[y+1][gridX]?.groupId === cell.groupId;
             const leftSame = grid[y][normalizeX(gridX-1)]?.groupId === cell.groupId;
             const rightSame = grid[y][normalizeX(gridX+1)]?.groupId === cell.groupId;
-
-            const pathData = getBlobPath(startX, yPos, cellWidth, BLOCK_SIZE, {
-                t: topSame, r: rightSame, b: bottomSame, l: leftSame
-            });
+            
+            const neighbors = { t: topSame, r: rightSame, b: bottomSame, l: leftSame };
+            const fillPath = getBlobPath(startX, yPos, cellWidth, BLOCK_SIZE, neighbors);
+            const contourPath = getContourPath(startX, yPos, cellWidth, BLOCK_SIZE, neighbors);
+            const highlightPath = getHighlightPath(startX, yPos, cellWidth, neighbors);
 
             // Fill Logic
             const totalDuration = cell.groupSize * PER_BLOCK_DURATION;
@@ -189,18 +224,17 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
 
             elements.push(
                 <g key={`cell-${cell.id}-${cell.timestamp}`} className={isFullyFilled ? "glow-anim" : ""}>
-                    {/* Outline / Shell */}
+                    {/* Shell Fill (Background) - increased opacity to hide seams */}
                     <path 
-                        d={pathData} 
+                        d={fillPath} 
                         fill={cell.color} 
-                        fillOpacity={0.1}
-                        stroke={cell.color} 
-                        strokeWidth="2"
+                        fillOpacity={0.2}
+                        stroke="none"
                     />
 
-                    {/* Animated Fill */}
+                    {/* Animated Fill Level */}
                     <clipPath id={`clip-${cell.id}-${y}-${visX}`}>
-                         <path d={pathData} />
+                         <path d={fillPath} />
                     </clipPath>
 
                     {/* Masking Rect for fill level */}
@@ -210,20 +244,30 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
                         width={cellWidth} 
                         height={fillHeight} 
                         fill={cell.color} 
-                        fillOpacity={0.9}
+                        fillOpacity={0.9} 
                         clipPath={`url(#clip-${cell.id}-${y}-${visX})`}
+                    />
+
+                    {/* External Contour (Stroke) - ONLY draws outer edges */}
+                    <path 
+                        d={contourPath} 
+                        fill="none" 
+                        stroke={cell.color} 
+                        strokeWidth="2"
                     />
                     
                     {/* Highlight/Reflection for Goopiness */}
-                    <path 
-                        d={`M ${startX + 5} ${yPos + 5} Q ${startX + cellWidth/2} ${yPos + 5} ${startX + cellWidth - 5} ${yPos + 5}`}
-                        fill="none"
-                        stroke="white"
-                        strokeWidth="2"
-                        strokeOpacity={0.3}
-                        strokeLinecap="round"
-                        clipPath={`url(#clip-${cell.id}-${y}-${visX})`}
-                    />
+                    {highlightPath && (
+                      <path 
+                          d={highlightPath}
+                          fill="none"
+                          stroke="white"
+                          strokeWidth="2"
+                          strokeOpacity={0.4}
+                          strokeLinecap="round"
+                          clipPath={`url(#clip-${cell.id}-${y}-${visX})`}
+                      />
+                    )}
                 </g>
             );
         }
@@ -244,32 +288,56 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
              const cellWidth = endX - startX;
              const yPos = (block.y - BUFFER_HEIGHT) * BLOCK_SIZE;
              
+             // Falling blocks are single, so no neighbors
+             const neighbors = { t: false, r: false, b: false, l: false };
+             const fillPath = getBlobPath(startX, yPos, cellWidth, BLOCK_SIZE, neighbors);
+             const contourPath = getContourPath(startX, yPos, cellWidth, BLOCK_SIZE, neighbors);
+             const highlightPath = getHighlightPath(startX, yPos, cellWidth, neighbors);
+
              elements.push(
                  <g key={`falling-${block.data.id}`}>
-                    <rect
-                        x={startX}
-                        y={yPos}
-                        width={cellWidth}
-                        height={BLOCK_SIZE}
+                    <path 
+                        d={fillPath}
                         fill={block.data.color}
-                        rx={RADIUS}
+                        fillOpacity={0.9}
+                        stroke="none"
+                    />
+                    <path 
+                        d={contourPath}
+                        fill="none"
                         stroke="white"
                         strokeWidth="1"
-                        strokeOpacity={0.5}
+                        strokeOpacity={0.8}
                     />
+                    {highlightPath && (
+                        <path 
+                            d={highlightPath}
+                            fill="none"
+                            stroke="white"
+                            strokeWidth="2"
+                            strokeOpacity={0.6}
+                            strokeLinecap="round"
+                        />
+                    )}
                  </g>
              );
         }
     });
     
-    // 4. Ghost Piece
+    // 4. Ghost Piece & Active Piece
+    // Helper to check connectivity within the active piece
+    const isConnected = (cells: Coordinate[], currentIdx: number, dx: number, dy: number) => {
+        const curr = cells[currentIdx];
+        return cells.some(other => other.x === curr.x + dx && other.y === curr.y + dy);
+    };
+
     if (activePiece) {
         const ghostY = getGhostY(grid, activePiece, boardOffset);
         
+        // Render Ghost
         activePiece.cells.forEach((cell, idx) => {
             const pieceGridX = normalizeX(activePiece.x + cell.x);
             const pieceGridY = ghostY + cell.y;
-            
             if (pieceGridY < BUFFER_HEIGHT) return;
             
             let visX = pieceGridX - boardOffset;
@@ -281,61 +349,84 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
                  const endX = getScreenX(visX + 1);
                  const cellWidth = endX - startX;
                  const yPos = (pieceGridY - BUFFER_HEIGHT) * BLOCK_SIZE;
-                 
+
+                 const neighbors = {
+                     t: isConnected(activePiece.cells, idx, 0, -1),
+                     r: isConnected(activePiece.cells, idx, 1, 0),
+                     b: isConnected(activePiece.cells, idx, 0, 1),
+                     l: isConnected(activePiece.cells, idx, -1, 0),
+                 };
+                 const contourPath = getContourPath(startX, yPos, cellWidth, BLOCK_SIZE, neighbors);
+
                  elements.push(
-                   <rect
+                   <path
                      key={`ghost-${idx}`}
-                     x={startX}
-                     y={yPos}
-                     width={cellWidth}
-                     height={BLOCK_SIZE}
+                     d={contourPath}
                      fill="none"
                      stroke={activePiece.definition.color}
                      strokeWidth="1"
                      strokeDasharray="4 2"
                      opacity="0.3"
-                     rx={RADIUS}
                    />
                  );
             }
         });
-    }
 
-    // 5. Active Piece
-    if (activePiece) {
-      activePiece.cells.forEach((cell, idx) => {
-        const pieceGridX = normalizeX(activePiece.x + cell.x);
-        const pieceGridY = activePiece.y + cell.y;
-        
-        if (pieceGridY < BUFFER_HEIGHT) return;
+        // Render Active Piece
+        activePiece.cells.forEach((cell, idx) => {
+            const pieceGridX = normalizeX(activePiece.x + cell.x);
+            const pieceGridY = activePiece.y + cell.y;
+            if (pieceGridY < BUFFER_HEIGHT) return;
 
-        let visX = pieceGridX - boardOffset;
-        if (visX > TOTAL_WIDTH / 2) visX -= TOTAL_WIDTH;
-        if (visX < -TOTAL_WIDTH / 2) visX += TOTAL_WIDTH;
+            let visX = pieceGridX - boardOffset;
+            if (visX > TOTAL_WIDTH / 2) visX -= TOTAL_WIDTH;
+            if (visX < -TOTAL_WIDTH / 2) visX += TOTAL_WIDTH;
 
-        if (visX >= -2 && visX < VISIBLE_WIDTH + 2) {
-             const startX = getScreenX(visX);
-             const endX = getScreenX(visX + 1);
-             const cellWidth = endX - startX;
-             const yPos = (pieceGridY - BUFFER_HEIGHT) * BLOCK_SIZE;
+            if (visX >= -2 && visX < VISIBLE_WIDTH + 2) {
+                 const startX = getScreenX(visX);
+                 const endX = getScreenX(visX + 1);
+                 const cellWidth = endX - startX;
+                 const yPos = (pieceGridY - BUFFER_HEIGHT) * BLOCK_SIZE;
+
+                 const neighbors = {
+                     t: isConnected(activePiece.cells, idx, 0, -1),
+                     r: isConnected(activePiece.cells, idx, 1, 0),
+                     b: isConnected(activePiece.cells, idx, 0, 1),
+                     l: isConnected(activePiece.cells, idx, -1, 0),
+                 };
+
+                 const fillPath = getBlobPath(startX, yPos, cellWidth, BLOCK_SIZE, neighbors);
+                 const contourPath = getContourPath(startX, yPos, cellWidth, BLOCK_SIZE, neighbors);
+                 const highlightPath = getHighlightPath(startX, yPos, cellWidth, neighbors);
              
-             elements.push(
-               <rect
-                 key={`piece-${idx}`}
-                 x={startX}
-                 y={yPos}
-                 width={cellWidth}
-                 height={BLOCK_SIZE}
-                 fill={activePiece.definition.color}
-                 stroke={activePiece.definition.color}
-                 strokeWidth="2"
-                 rx={RADIUS}
-                 pointerEvents="none"
-                 fillOpacity={0.6}
-               />
-             );
-        }
-      });
+                 elements.push(
+                   <g key={`piece-${idx}`}>
+                       <path
+                         d={fillPath}
+                         fill={activePiece.definition.color}
+                         fillOpacity={0.8} // Higher opacity for active piece to look solid
+                         stroke="none"
+                       />
+                       <path
+                         d={contourPath}
+                         fill="none"
+                         stroke={activePiece.definition.color}
+                         strokeWidth="2"
+                       />
+                       {highlightPath && (
+                           <path 
+                              d={highlightPath}
+                              fill="none"
+                              stroke="white"
+                              strokeWidth="2"
+                              strokeOpacity={0.6}
+                              strokeLinecap="round"
+                           />
+                       )}
+                   </g>
+                 );
+            }
+        });
     }
 
     return elements;
