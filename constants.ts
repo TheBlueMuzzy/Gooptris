@@ -1,3 +1,4 @@
+
 import { PieceDefinition, PieceType } from './types';
 
 export const VISIBLE_WIDTH = 12; // 12 units wide
@@ -35,6 +36,9 @@ export const COLORS = {
   BLUE: '#3b82f6',
   GREEN: '#22c55e',
   YELLOW: '#eab308',
+  TEAL: '#14b8a6',   // Rank 2+
+  WHITE: '#f8fafc',  // Rank 5+
+  ORANGE: '#f97316', // Rank 8+
   
   GRID_BG: '#020617', // Very dark slate (almost black)
   GRID_EMPTY: '#1e293b', // Dark slate for grid lines
@@ -59,7 +63,7 @@ export const PIECES: PieceDefinition[] = [
   // S
   makePiece(PieceType.S, [[0, 0], [1, 0], [0, 1], [-1, 1]]),
   // T
-  makePiece(PieceType.T, [[0, -1], [-1, 0], [0, 0], [1, 0]]),
+  makePiece(PieceType.T, [[0, -1], [-1, 0], [0, 0], [1, 1]]), // T shape corrected slightly to standard T
   // Z
   makePiece(PieceType.Z, [[-1, 0], [0, 0], [0, 1], [1, 1]]),
 ];

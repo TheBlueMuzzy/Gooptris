@@ -1,5 +1,6 @@
+
 import { ActivePiece, Coordinate, GridCell, PieceDefinition, PieceType, BlockData, FallingBlock } from '../types';
-import { TOTAL_WIDTH, TOTAL_HEIGHT, PIECES, GAME_COLORS, VISIBLE_WIDTH, BUFFER_HEIGHT } from '../constants';
+import { TOTAL_WIDTH, TOTAL_HEIGHT, PIECES, GAME_COLORS, VISIBLE_WIDTH, BUFFER_HEIGHT, COLORS } from '../constants';
 
 export const normalizeX = (x: number): number => {
   return ((x % TOTAL_WIDTH) + TOTAL_WIDTH) % TOTAL_WIDTH;
@@ -15,9 +16,18 @@ export const getRotatedCells = (cells: Coordinate[], clockwise: boolean): Coordi
   });
 };
 
-export const spawnPiece = (definition?: PieceDefinition): ActivePiece => {
+export const getPaletteForRank = (rank: number): string[] => {
+  const palette = [COLORS.RED, COLORS.BLUE, COLORS.GREEN, COLORS.YELLOW];
+  if (rank >= 2) palette.push(COLORS.TEAL);
+  if (rank >= 5) palette.push(COLORS.WHITE);
+  if (rank >= 8) palette.push(COLORS.ORANGE);
+  return palette;
+};
+
+export const spawnPiece = (definition?: PieceDefinition, rank: number = 1): ActivePiece => {
   const def = definition || PIECES[Math.floor(Math.random() * PIECES.length)];
-  const color = GAME_COLORS[Math.floor(Math.random() * GAME_COLORS.length)];
+  const palette = getPaletteForRank(rank);
+  const color = palette[Math.floor(Math.random() * palette.length)];
   
   return {
     definition: { ...def, color },
@@ -28,6 +38,47 @@ export const spawnPiece = (definition?: PieceDefinition): ActivePiece => {
     spawnTimestamp: Date.now(),
     startSpawnY: 0 // Set by caller
   };
+};
+
+export const createInitialGrid = (rank: number): GridCell[][] => {
+  const grid = Array(TOTAL_HEIGHT).fill(null).map(() => Array(TOTAL_WIDTH).fill(null));
+
+  // Starting Junk Logic (Section 11.2)
+  let junkCount = 0;
+  if (rank >= 9) junkCount = 11;      // ~35%
+  else if (rank >= 6) junkCount = 8;  // ~25%
+  else if (rank >= 3) junkCount = 5;  // ~15%
+
+  if (junkCount > 0) {
+      const palette = getPaletteForRank(rank);
+      const availableCols = Array.from({ length: TOTAL_WIDTH }, (_, i) => i);
+      
+      // Fisher-Yates shuffle to pick unique columns
+      for (let i = availableCols.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [availableCols[i], availableCols[j]] = [availableCols[j], availableCols[i]];
+      }
+
+      const selectedCols = availableCols.slice(0, junkCount);
+      const y = TOTAL_HEIGHT - 1;
+
+      selectedCols.forEach(x => {
+          const color = palette[Math.floor(Math.random() * palette.length)];
+          const groupId = Math.random().toString(36).substr(2, 9);
+          
+          grid[y][x] = {
+              id: Math.random().toString(36).substr(2, 9),
+              groupId: groupId, // Unique group ID for each junk block = Single Unit Globs
+              timestamp: Date.now(),
+              color: color,
+              groupMinY: y,
+              groupMaxY: y,
+              groupSize: 1
+          };
+      });
+  }
+
+  return grid;
 };
 
 export const checkCollision = (grid: GridCell[][], piece: ActivePiece, boardOffset: number): boolean => {

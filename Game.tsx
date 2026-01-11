@@ -5,8 +5,10 @@ import { TOTAL_WIDTH, TOTAL_HEIGHT, VISIBLE_WIDTH, VISIBLE_HEIGHT, BASE_FILL_DUR
 import { 
     spawnPiece, checkCollision, mergePiece, getRotatedCells, normalizeX, findContiguousGroup, 
     updateGroups, getGhostY, updateFallingBlocks, getFloatingBlocks,
-    calculateHeightBonus, calculateOffScreenBonus, calculateMultiplier, calculateAdjacencyBonus 
+    calculateHeightBonus, calculateOffScreenBonus, calculateMultiplier, calculateAdjacencyBonus, createInitialGrid,
+    getPaletteForRank
 } from './utils/gameLogic';
+import { calculateRankDetails } from './utils/progression';
 import { GameBoard } from './components/GameBoard';
 import { Controls } from './components/Controls';
 import { Play, RotateCcw, Home } from 'lucide-react';
@@ -15,9 +17,6 @@ const INITIAL_SPEED = 800; // ms per block
 const MIN_SPEED = 100;
 const SOFT_DROP_FACTOR = 20; // 20x speed when soft dropping
 const LOCK_DELAY_MS = 500; // Time to slide before locking
-
-const createGrid = (): GridCell[][] => 
-  Array(TOTAL_HEIGHT).fill(null).map(() => Array(TOTAL_WIDTH).fill(null));
 
 interface GameProps {
   onExit: () => void;
@@ -29,7 +28,12 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
   // Add a generation ID to force hard resets of the game loop
   const [gameId, setGameId] = useState(0);
 
-  const [grid, setGrid] = useState<GridCell[][]>(createGrid());
+  // Grid initialization: Use lazy initializer to prevent empty grid crash on first render
+  const [grid, setGrid] = useState<GridCell[][]>(() => {
+      const rank = calculateRankDetails(initialTotalScore).rank;
+      return createInitialGrid(rank);
+  });
+  
   const [activePiece, setActivePiece] = useState<ActivePiece | null>(null);
   const [storedPiece, setStoredPiece] = useState<PieceDefinition | null>(null);
   const [boardOffset, setBoardOffset] = useState(0); 
@@ -75,18 +79,21 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
   
   // Ref to hold latest state for the animation loop
   const stateRef = useRef({ 
-      activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown, floatingTexts
+      activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown, floatingTexts, score
   });
 
   useEffect(() => {
     stateRef.current = { 
-        activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown, floatingTexts
+        activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown, floatingTexts, score
     };
     gameOverRef.current = gameOver;
     isPausedRef.current = isPaused;
-  }, [activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown, floatingTexts]);
+  }, [activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown, floatingTexts, score]);
 
   useEffect(() => {
+    // Only trigger startNewGame if we are actually starting fresh, otherwise we rely on initial state
+    // But since startNewGame resets other state too, we should call it. 
+    // The grid set in startNewGame will overwrite the initial state, which is fine (idempotent for grid if logic matches).
     startNewGame();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -118,12 +125,13 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
   };
 
   const startNewGame = useCallback(() => {
-    const newGrid = createGrid();
-    const newOffset = 0;
-
     // Update the baseline score for this run to the latest total score from the parent
-    // This ensures that when we finish this new game, the HUD counts up from the correct total
     initialTotalScoreRef.current = latestTotalScorePropRef.current;
+    
+    // Determine start rank for Junk generation
+    const startRank = calculateRankDetails(initialTotalScoreRef.current).rank;
+    const newGrid = createInitialGrid(startRank);
+    const newOffset = 0;
 
     // Force a cycle of the game loop
     setGameId(prev => prev + 1);
@@ -157,18 +165,22 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
 
     heldKeys.current.clear();
     
-    const piece = spawnPiece();
+    const piece = spawnPiece(undefined, startRank);
     piece.x = getCenteredSpawnX(newOffset);
     piece.y = 1; 
     piece.startSpawnY = 1;
     setActivePiece(piece);
-  }, []); // Empty deps as mostly setters or constants
+  }, []); 
 
   const spawnNewPiece = useCallback((pieceDef?: PieceDefinition, gridOverride?: GridCell[][], offsetOverride?: number) => {
     const currentGrid = gridOverride || stateRef.current.grid;
     const currentOffset = offsetOverride !== undefined ? offsetOverride : stateRef.current.boardOffset;
 
-    const piece = spawnPiece(pieceDef);
+    // Determine current rank for color palette (dynamically scales mid-run)
+    const currentTotalScore = initialTotalScoreRef.current + stateRef.current.score;
+    const currentRank = calculateRankDetails(currentTotalScore).rank;
+
+    const piece = spawnPiece(pieceDef, currentRank);
     piece.x = getCenteredSpawnX(currentOffset);
     piece.y = 1; 
     piece.startSpawnY = 1;
@@ -391,7 +403,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
           }
       } else {
           setStoredPiece(currentDef);
-          spawnNewPiece();
+          spawnNewPiece(); // Spawns new random piece with current rank colors
           setCanSwap(false);
       }
   }, [activePiece, storedPiece, grid, boardOffset, gameOver, isPaused, canSwap, countdown, spawnNewPiece]);
