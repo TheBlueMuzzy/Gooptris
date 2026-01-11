@@ -1,6 +1,6 @@
 
-import React, { useMemo } from 'react';
-import { Play, Settings, Zap, Trash2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { Play, Settings, Zap, Trash2, AlertTriangle } from 'lucide-react';
 import { SaveData } from '../types';
 import { calculateRankDetails } from '../utils/progression';
 
@@ -13,9 +13,22 @@ interface MainMenuProps {
 }
 
 export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettings, saveData, onWipeSave }) => {
+  const [confirmWipe, setConfirmWipe] = useState(false);
   
-  const rankInfo = useMemo(() => calculateRankDetails(saveData.totalScore), [saveData.totalScore]);
+  // Calculate directly from props every render to avoid stale memoization issues
+  const rankInfo = calculateRankDetails(saveData.totalScore);
   const progressPercent = rankInfo.isMaxRank ? 100 : (rankInfo.progress / rankInfo.toNextRank) * 100;
+
+  const handleWipeClick = () => {
+    if (confirmWipe) {
+      onWipeSave();
+      setConfirmWipe(false);
+    } else {
+      setConfirmWipe(true);
+      // Reset confirmation state after 3 seconds if not clicked again
+      setTimeout(() => setConfirmWipe(false), 3000);
+    }
+  };
 
   return (
     <div className="w-full h-full flex flex-col items-center justify-center p-6 gap-8 animate-in fade-in duration-500 overflow-hidden bg-slate-950 relative">
@@ -63,7 +76,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettin
       </div>
 
       {/* Buttons */}
-      <div className="flex flex-col gap-4 w-full max-w-xs z-10">
+      <div className="flex flex-col gap-4 w-full max-w-xs z-10 relative">
         <button 
           onClick={onPlay}
           className="group relative flex items-center justify-center gap-4 px-8 py-6 bg-green-700 hover:bg-green-600 text-white font-bold rounded-xl shadow-[0_0_30px_rgba(21,128,61,0.4)] hover:shadow-[0_0_50px_rgba(34,197,94,0.6)] transition-all active:scale-95 text-2xl border border-green-500/30 overflow-hidden"
@@ -91,12 +104,18 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettin
       </div>
 
       {/* Footer / Dev Tools */}
-      <div className="absolute bottom-6 w-full flex flex-col items-center gap-4 z-10">
+      <div className="absolute bottom-6 w-full flex flex-col items-center gap-4 z-50 pointer-events-auto">
           <button 
-            onClick={onWipeSave}
-            className="text-red-900/50 hover:text-red-500 text-xs font-mono uppercase tracking-widest flex items-center gap-2 px-3 py-1 rounded border border-transparent hover:border-red-900/50 transition-colors"
+            onClick={handleWipeClick}
+            className={`relative z-50 text-xs font-mono uppercase tracking-widest flex items-center gap-2 px-3 py-1 rounded border transition-all cursor-pointer active:scale-95 duration-200 ${
+              confirmWipe 
+                ? 'bg-red-900/80 border-red-500 text-white shadow-[0_0_15px_rgba(220,38,38,0.5)]' 
+                : 'text-red-900/50 hover:text-red-500 border-transparent hover:border-red-900/50'
+            }`}
+            style={{ pointerEvents: 'auto' }}
           >
-             <Trash2 className="w-3 h-3" /> WIPE SAVE DATA (TESTING)
+             {confirmWipe ? <AlertTriangle className="w-3 h-3 animate-pulse" /> : <Trash2 className="w-3 h-3" />}
+             {confirmWipe ? "CONFIRM WIPE?" : "WIPE SAVE DATA (TESTING)"}
           </button>
           <div className="text-slate-600 text-xs font-mono">v1.1 &bull; REACTOR STABLE</div>
       </div>

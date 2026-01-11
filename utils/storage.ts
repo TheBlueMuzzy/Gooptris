@@ -48,3 +48,13 @@ export const saveGameData = (data: SaveData) => {
 export const clearSaveData = () => {
   localStorage.removeItem(STORAGE_KEY);
 };
+
+export const wipeSaveData = (): SaveData => {
+  const fresh = getDefaultSaveData();
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(fresh));
+  } catch (e) {
+    console.error("Failed to wipe save data", e);
+  }
+  return fresh;
+};

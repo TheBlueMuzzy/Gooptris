@@ -5,16 +5,18 @@ import { MainMenu } from './components/MainMenu';
 import { Upgrades } from './components/Upgrades';
 import { Settings } from './components/Settings';
 import { SaveData } from './types';
-import { loadSaveData, saveGameData, clearSaveData, getDefaultSaveData } from './utils/storage';
+import { loadSaveData, saveGameData, wipeSaveData } from './utils/storage';
 import { calculateRankDetails } from './utils/progression';
 
 type ViewState = 'MENU' | 'GAME' | 'UPGRADES' | 'SETTINGS';
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('MENU');
-  const [saveData, setSaveData] = useState<SaveData>(loadSaveData());
+  
+  // Lazy initialization ensures loadSaveData only runs once on mount
+  const [saveData, setSaveData] = useState<SaveData>(() => loadSaveData());
 
-  // Save whenever state updates (debouncing optional but safe enough here)
+  // Save whenever state updates
   useEffect(() => {
     saveGameData(saveData);
   }, [saveData]);
@@ -48,10 +50,10 @@ const App: React.FC = () => {
   }, []);
 
   const handleWipeSave = () => {
-    if (window.confirm("WARNING: This will delete all progress, rank, and upgrades. Are you sure?")) {
-      clearSaveData();
-      setSaveData(getDefaultSaveData());
-    }
+      // We use wipeSaveData to synchronously reset storage to defaults
+      const freshData = wipeSaveData();
+      // We then immediately update React state to reflect this change in the UI
+      setSaveData(freshData);
   };
 
   return (
@@ -59,7 +61,7 @@ const App: React.FC = () => {
       {view === 'MENU' && (
         <MainMenu 
           onPlay={() => setView('GAME')} 
-          onUpgrades={() => setView('UPGRADES')}
+          onUpgrades={() => setView('UPGRADES')} 
           onSettings={() => setView('SETTINGS')}
           saveData={saveData}
           onWipeSave={handleWipeSave}
