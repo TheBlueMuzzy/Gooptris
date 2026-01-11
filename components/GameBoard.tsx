@@ -1,5 +1,5 @@
 import React, { useMemo, useCallback } from 'react';
-import { GameState, Coordinate } from '../types';
+import { GameState, Coordinate, FallingBlock } from '../types';
 import { VISIBLE_WIDTH, VISIBLE_HEIGHT, COLORS, TOTAL_WIDTH, TOTAL_HEIGHT, BUFFER_HEIGHT, PER_BLOCK_DURATION } from '../constants';
 import { normalizeX, getGhostY } from '../utils/gameLogic';
 
@@ -74,13 +74,13 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
   }, [boardOffset, onBlockTap, vbX, vbY, vbW, vbH]);
 
   const style = useMemo(() => `
-    .glow-anim {
-        filter: drop-shadow(0 0 4px white);
-        animation: pulseGlow 1.5s infinite alternate;
+    .glow-stroke {
+        filter: drop-shadow(0 0 3px currentColor);
+        animation: pulseGlow 2s infinite alternate;
     }
     @keyframes pulseGlow {
-        from { filter: drop-shadow(0 0 2px white); stroke-width: 2px; }
-        to { filter: drop-shadow(0 0 8px white); stroke-width: 3px; }
+        from { filter: drop-shadow(0 0 2px currentColor); }
+        to { filter: drop-shadow(0 0 6px currentColor); }
     }
   `, []);
 
@@ -164,8 +164,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
     // 1. Grid Blocks (Background mesh)
     for (let y = BUFFER_HEIGHT; y < BUFFER_HEIGHT + VISIBLE_HEIGHT; y++) {
       for (let visX = 0; visX <= VISIBLE_WIDTH; visX++) {
-        const gridX = normalizeX(visX + boardOffset);
-        
         const startX = getScreenX(visX);
         const endX = getScreenX(visX + 1);
         const cellWidth = endX - startX;
@@ -223,8 +221,8 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
             const isFullyFilled = timeSinceStart >= totalDuration;
 
             elements.push(
-                <g key={`cell-${cell.id}-${cell.timestamp}`} className={isFullyFilled ? "glow-anim" : ""}>
-                    {/* Shell Fill (Background) - increased opacity to hide seams */}
+                <g key={`cell-${cell.id}-${cell.timestamp}`}>
+                    {/* Shell Fill (Background) */}
                     <path 
                         d={fillPath} 
                         fill={cell.color} 
@@ -248,15 +246,17 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
                         clipPath={`url(#clip-${cell.id}-${y}-${visX})`}
                     />
 
-                    {/* External Contour (Stroke) - ONLY draws outer edges */}
+                    {/* External Contour (Stroke) - NOW WITH GLOW */}
                     <path 
                         d={contourPath} 
                         fill="none" 
                         stroke={cell.color} 
                         strokeWidth="2"
+                        className={isFullyFilled ? "glow-stroke" : ""}
+                        style={{ color: cell.color }} // passing color for currentColor
                     />
                     
-                    {/* Highlight/Reflection for Goopiness */}
+                    {/* Highlight */}
                     {highlightPath && (
                       <path 
                           d={highlightPath}
@@ -274,58 +274,80 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
       }
     }
     
-    // 3. Falling Blocks
-    fallingBlocks.forEach((block) => {
-        if (block.y < BUFFER_HEIGHT - 1) return; 
-
-        let visX = block.x - boardOffset;
-        if (visX > TOTAL_WIDTH / 2) visX -= TOTAL_WIDTH;
-        if (visX < -TOTAL_WIDTH / 2) visX += TOTAL_WIDTH;
-        
-        if (visX >= 0 && visX < VISIBLE_WIDTH) {
-             const startX = getScreenX(visX);
-             const endX = getScreenX(visX + 1);
-             const cellWidth = endX - startX;
-             const yPos = (block.y - BUFFER_HEIGHT) * BLOCK_SIZE;
-             
-             // Falling blocks are single, so no neighbors
-             const neighbors = { t: false, r: false, b: false, l: false };
-             const fillPath = getBlobPath(startX, yPos, cellWidth, BLOCK_SIZE, neighbors);
-             const contourPath = getContourPath(startX, yPos, cellWidth, BLOCK_SIZE, neighbors);
-             const highlightPath = getHighlightPath(startX, yPos, cellWidth, neighbors);
-
-             elements.push(
-                 <g key={`falling-${block.data.id}`}>
-                    <path 
-                        d={fillPath}
-                        fill={block.data.color}
-                        fillOpacity={0.9}
-                        stroke="none"
-                    />
-                    <path 
-                        d={contourPath}
-                        fill="none"
-                        stroke="white"
-                        strokeWidth="1"
-                        strokeOpacity={0.8}
-                    />
-                    {highlightPath && (
-                        <path 
-                            d={highlightPath}
-                            fill="none"
-                            stroke="white"
-                            strokeWidth="2"
-                            strokeOpacity={0.6}
-                            strokeLinecap="round"
-                        />
-                    )}
-                 </g>
-             );
+    // 3. Falling Blocks (Grouped by groupId for fused rendering)
+    const fallingGroups = new Map<string, FallingBlock[]>();
+    fallingBlocks.forEach(b => {
+        if (!fallingGroups.has(b.data.groupId)) {
+            fallingGroups.set(b.data.groupId, []);
         }
+        fallingGroups.get(b.data.groupId)!.push(b);
+    });
+
+    fallingGroups.forEach((group, groupId) => {
+        // Build efficient lookup for neighbors within this falling group
+        const coords = new Set<string>();
+        group.forEach(b => coords.add(`${Math.round(b.x)},${Math.round(b.y)}`));
+
+        group.forEach(block => {
+            if (block.y < BUFFER_HEIGHT - 1) return; 
+
+            let visX = block.x - boardOffset;
+            if (visX > TOTAL_WIDTH / 2) visX -= TOTAL_WIDTH;
+            if (visX < -TOTAL_WIDTH / 2) visX += TOTAL_WIDTH;
+            
+            if (visX >= 0 && visX < VISIBLE_WIDTH) {
+                 const startX = getScreenX(visX);
+                 const endX = getScreenX(visX + 1);
+                 const cellWidth = endX - startX;
+                 const yPos = (block.y - BUFFER_HEIGHT) * BLOCK_SIZE;
+                 
+                 const bx = Math.round(block.x);
+                 const by = Math.round(block.y);
+
+                 const neighbors = {
+                     t: coords.has(`${bx},${by - 1}`),
+                     r: coords.has(`${normalizeX(bx + 1)},${by}`),
+                     b: coords.has(`${bx},${by + 1}`),
+                     l: coords.has(`${normalizeX(bx - 1)},${by}`),
+                 };
+
+                 const fillPath = getBlobPath(startX, yPos, cellWidth, BLOCK_SIZE, neighbors);
+                 const contourPath = getContourPath(startX, yPos, cellWidth, BLOCK_SIZE, neighbors);
+                 const highlightPath = getHighlightPath(startX, yPos, cellWidth, neighbors);
+
+                 elements.push(
+                     <g key={`falling-${block.data.id}`}>
+                        <path 
+                            d={fillPath}
+                            fill={block.data.color}
+                            fillOpacity={0.9}
+                            stroke="none"
+                        />
+                        <path 
+                            d={contourPath}
+                            fill="none"
+                            stroke={block.data.color}
+                            strokeWidth="2"
+                            className="glow-stroke"
+                            style={{ color: block.data.color }}
+                        />
+                        {highlightPath && (
+                            <path 
+                                d={highlightPath}
+                                fill="none"
+                                stroke="white"
+                                strokeWidth="2"
+                                strokeOpacity={0.6}
+                                strokeLinecap="round"
+                            />
+                        )}
+                     </g>
+                 );
+            }
+        });
     });
     
     // 4. Ghost Piece & Active Piece
-    // Helper to check connectivity within the active piece
     const isConnected = (cells: Coordinate[], currentIdx: number, dx: number, dy: number) => {
         const curr = cells[currentIdx];
         return cells.some(other => other.x === curr.x + dx && other.y === curr.y + dy);
@@ -334,7 +356,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
     if (activePiece) {
         const ghostY = getGhostY(grid, activePiece, boardOffset);
         
-        // Render Ghost
+        // Render Ghost (Contour only)
         activePiece.cells.forEach((cell, idx) => {
             const pieceGridX = normalizeX(activePiece.x + cell.x);
             const pieceGridY = ghostY + cell.y;
@@ -404,7 +426,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
                        <path
                          d={fillPath}
                          fill={activePiece.definition.color}
-                         fillOpacity={0.8} // Higher opacity for active piece to look solid
+                         fillOpacity={0.8} 
                          stroke="none"
                        />
                        <path
@@ -412,6 +434,8 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
                          fill="none"
                          stroke={activePiece.definition.color}
                          strokeWidth="2"
+                         className="glow-stroke"
+                         style={{ color: activePiece.definition.color }}
                        />
                        {highlightPath && (
                            <path 
