@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { GameState, GridCell, ActivePiece, PieceDefinition, PieceType, FallingBlock, ScoreBreakdown, GameStats } from './types';
+import { GameState, GridCell, ActivePiece, PieceDefinition, PieceType, FallingBlock, ScoreBreakdown, GameStats, FloatingText } from './types';
 import { TOTAL_WIDTH, TOTAL_HEIGHT, VISIBLE_WIDTH, VISIBLE_HEIGHT, BASE_FILL_DURATION, PER_BLOCK_DURATION, GAME_COLORS, PIECES, INITIAL_TIME_MS, SCORE_THRESHOLD, TIME_BONUS_MS } from './constants';
 import { 
     spawnPiece, checkCollision, mergePiece, getRotatedCells, normalizeX, findContiguousGroup, 
@@ -40,6 +40,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
   const [fallingBlocks, setFallingBlocks] = useState<FallingBlock[]>([]);
   const [isSoftDropping, setIsSoftDropping] = useState(false);
   const [timeLeft, setTimeLeft] = useState(INITIAL_TIME_MS);
+  const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
   
   // Statistics
   const [scoreBreakdown, setScoreBreakdown] = useState<ScoreBreakdown>({ base: 0, height: 0, offscreen: 0, adjacency: 0, speed: 0 });
@@ -62,16 +63,16 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
   
   // Ref to hold latest state for the animation loop
   const stateRef = useRef({ 
-      activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown
+      activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown, floatingTexts
   });
 
   useEffect(() => {
     stateRef.current = { 
-        activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown
+        activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown, floatingTexts
     };
     gameOverRef.current = gameOver;
     isPausedRef.current = isPaused;
-  }, [activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown]);
+  }, [activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown, floatingTexts]);
 
   useEffect(() => {
     startNewGame();
@@ -128,6 +129,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
     setFallingBlocks([]);
     setIsSoftDropping(false);
     setTimeLeft(INITIAL_TIME_MS);
+    setFloatingTexts([]);
     lockStartTimeRef.current = null;
     
     // Reset Stats
@@ -249,8 +251,21 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
              tapBreakdown.offscreen += (oScore * multiplier);
         });
         
-        updateScoreAndStats(Math.floor(totalScoreForTap), tapBreakdown);
+        const roundedScore = Math.floor(totalScoreForTap);
+        updateScoreAndStats(roundedScore, tapBreakdown);
         setCombo(currentComboCount);
+
+        // Add Floating Text
+        const textId = Math.random().toString(36).substr(2, 9);
+        setFloatingTexts(prev => [
+            ...prev, 
+            { id: textId, text: `+${roundedScore}`, x, y, life: 1, color: '#fbbf24' }
+        ]);
+        
+        // Auto remove after 1s
+        setTimeout(() => {
+            setFloatingTexts(prev => prev.filter(ft => ft.id !== textId));
+        }, 1000);
 
         // Removal
         let tempGrid = grid.map(row => [...row]);
@@ -521,7 +536,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
 
   const gameState: GameState = {
       grid, boardOffset, activePiece, storedPiece, score, gameOver, isPaused, canSwap,
-      level: 1, cellsCleared, combo, fallingBlocks, timeLeft, scoreBreakdown, gameStats
+      level: 1, cellsCleared, combo, fallingBlocks, timeLeft, scoreBreakdown, gameStats, floatingTexts
   };
 
   return (

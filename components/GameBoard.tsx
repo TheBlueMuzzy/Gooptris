@@ -1,3 +1,4 @@
+
 import React, { useMemo, useCallback, useRef } from 'react';
 import { GameState, Coordinate, FallingBlock, GridCell } from '../types';
 import { VISIBLE_WIDTH, VISIBLE_HEIGHT, COLORS, TOTAL_WIDTH, TOTAL_HEIGHT, BUFFER_HEIGHT, PER_BLOCK_DURATION } from '../constants';
@@ -33,7 +34,7 @@ interface RenderableCell {
 export const GameBoard: React.FC<GameBoardProps> = ({ 
     state, onBlockTap, onTapLeft, onTapRight, onSwipeUp, onSwipeDown, onSwipeLeft, onSwipeRight 
 }) => {
-  const { grid, boardOffset, activePiece, fallingBlocks } = state;
+  const { grid, boardOffset, activePiece, fallingBlocks, floatingTexts } = state;
 
   // --- CYLINDRICAL PROJECTION LOGIC ---
   const ANGLE_PER_COL = (2 * Math.PI) / TOTAL_WIDTH; 
@@ -153,6 +154,17 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     @keyframes pulseGlow {
         from { filter: drop-shadow(0 0 2px currentColor); }
         to { filter: drop-shadow(0 0 6px currentColor); }
+    }
+    @keyframes floatUp {
+        0% { transform: translateY(0) scale(1); opacity: 1; }
+        100% { transform: translateY(-40px) scale(1.5); opacity: 0; }
+    }
+    .floating-score {
+        animation: floatUp 1s ease-out forwards;
+        font-family: monospace;
+        font-weight: 900;
+        text-shadow: 0px 2px 4px rgba(0,0,0,0.8);
+        pointer-events: none;
     }
   `, []);
 
@@ -572,6 +584,36 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                     </g>
                 );
             })()}
+
+            {/* 5. Floating Score Text */}
+            {floatingTexts.map(ft => {
+                let visX = ft.x - boardOffset;
+                if (visX > TOTAL_WIDTH / 2) visX -= TOTAL_WIDTH;
+                if (visX < -TOTAL_WIDTH / 2) visX += TOTAL_WIDTH;
+
+                if (visX >= -2 && visX < VISIBLE_WIDTH + 2) {
+                    const startX = getScreenX(visX);
+                    const width = getScreenX(visX+1) - startX;
+                    const yPos = (ft.y - BUFFER_HEIGHT) * BLOCK_SIZE;
+                    const cx = startX + width / 2;
+                    const cy = yPos + BLOCK_SIZE / 2;
+                    
+                    return (
+                        <text
+                            key={ft.id}
+                            x={cx}
+                            y={cy}
+                            fill={ft.color || '#fff'}
+                            textAnchor="middle"
+                            className="floating-score"
+                            fontSize="24"
+                        >
+                            {ft.text}
+                        </text>
+                    );
+                }
+                return null;
+            })}
 
         </svg>
     </div>

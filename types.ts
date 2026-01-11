@@ -63,6 +63,15 @@ export interface GameStats {
     maxGroupSize: number;
 }
 
+export interface FloatingText {
+    id: string;
+    text: string;
+    x: number; // Grid X
+    y: number; // Grid Y
+    life: number; // 0 to 1
+    color?: string;
+}
+
 export interface GameState {
   grid: GridCell[][]; // [y][x]
   boardOffset: number; // 0-TOTAL_WIDTH
@@ -81,6 +90,9 @@ export interface GameState {
   // New Stats
   scoreBreakdown: ScoreBreakdown;
   gameStats: GameStats;
+  
+  // Visuals
+  floatingTexts: FloatingText[];
 }
 
 // --- Meta Progression Types ---
