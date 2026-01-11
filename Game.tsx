@@ -26,6 +26,9 @@ interface GameProps {
 }
 
 const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore }) => {
+  // Add a generation ID to force hard resets of the game loop
+  const [gameId, setGameId] = useState(0);
+
   const [grid, setGrid] = useState<GridCell[][]>(createGrid());
   const [activePiece, setActivePiece] = useState<ActivePiece | null>(null);
   const [storedPiece, setStoredPiece] = useState<PieceDefinition | null>(null);
@@ -53,6 +56,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
   const gameOverRef = useRef(false);
   const isPausedRef = useRef(false);
   const lockStartTimeRef = useRef<number | null>(null);
+  const requestRef = useRef<number>(0);
   
   // We capture this once on mount to ensure the "Before" state for animations is preserved
   // even if the parent component updates the total score immediately on game over.
@@ -105,9 +109,12 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
     return normalizeX(offset + Math.floor((VISIBLE_WIDTH - 1) / 2));
   };
 
-  const startNewGame = () => {
+  const startNewGame = useCallback(() => {
     const newGrid = createGrid();
     const newOffset = 0;
+
+    // Force a cycle of the game loop
+    setGameId(prev => prev + 1);
 
     setGrid(newGrid);
     setBoardOffset(newOffset);
@@ -143,7 +150,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
     piece.y = 1; 
     piece.startSpawnY = 1;
     setActivePiece(piece);
-  };
+  }, []); // Empty deps as mostly setters or constants
 
   const spawnNewPiece = useCallback((pieceDef?: PieceDefinition, gridOverride?: GridCell[][], offsetOverride?: number) => {
     const currentGrid = gridOverride || stateRef.current.grid;
@@ -380,13 +387,17 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
   // --- Game Loop ---
   
   const gameLoop = useCallback((time: number) => {
-    if (!lastTimeRef.current) lastTimeRef.current = time;
+    // If lastTimeRef is 0 (first frame after restart), initialize it to current time
+    if (!lastTimeRef.current) {
+        lastTimeRef.current = time;
+    }
+    
     const dt = time - lastTimeRef.current;
     lastTimeRef.current = time;
 
     const state = stateRef.current;
     if (state.gameOver || state.isPaused || state.countdown !== null) {
-         requestAnimationFrame(gameLoop);
+         requestRef.current = requestAnimationFrame(gameLoop);
          return;
     }
 
@@ -474,15 +485,22 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
         }
     }
 
-    requestAnimationFrame(gameLoop);
+    requestRef.current = requestAnimationFrame(gameLoop);
   }, [spawnNewPiece]);
 
   useEffect(() => {
-    const handle = requestAnimationFrame(gameLoop);
-    return () => cancelAnimationFrame(handle);
-  }, [gameLoop]);
+    // Reset time reference on mount or when gameId changes (restart)
+    lastTimeRef.current = 0;
+    requestRef.current = requestAnimationFrame(gameLoop);
+    return () => cancelAnimationFrame(requestRef.current);
+  }, [gameLoop, gameId]); // Depends on gameId to restart loop on reset
 
-  // Keyboard
+  // -- KEYBOARD HANDLING --
+  const handlersRef = useRef({ moveBoard, rotatePiece, hardDrop, swapPiece, startNewGame });
+  useEffect(() => {
+    handlersRef.current = { moveBoard, rotatePiece, hardDrop, swapPiece, startNewGame };
+  }, [moveBoard, rotatePiece, hardDrop, swapPiece, startNewGame]);
+
   useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
           heldKeys.current.add(e.code);
@@ -495,11 +513,14 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
               });
               return;
           }
-          if (gameOver) {
-              if (e.key === 'Enter') startNewGame();
+          
+          if (gameOverRef.current) {
+              if (e.key === 'Enter') handlersRef.current.startNewGame();
               return;
           }
           if (e.repeat) return;
+
+          const { moveBoard, rotatePiece, hardDrop, swapPiece } = handlersRef.current;
 
           switch(e.code) {
               case 'ArrowLeft': case 'KeyA': moveBoard(1); break;
@@ -532,7 +553,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
           window.removeEventListener('keydown', handleKeyDown);
           window.removeEventListener('keyup', handleKeyUp);
       };
-  }, [moveBoard, rotatePiece, hardDrop, swapPiece, gameOver]);
+  }, []); 
 
   const gameState: GameState = {
       grid, boardOffset, activePiece, storedPiece, score, gameOver, isPaused, canSwap,
