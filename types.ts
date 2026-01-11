@@ -82,3 +82,26 @@ export interface GameState {
   scoreBreakdown: ScoreBreakdown;
   gameStats: GameStats;
 }
+
+// --- Meta Progression Types ---
+
+export interface SaveData {
+  rank: number;            // Current Player Rank (1-100)
+  totalScore: number;      // Cumulative score across all runs
+  powerUpPoints: number;   // Currency to buy upgrades
+  powerUps: Record<string, number>; // Map of UpgradeID -> Grade Level
+  firstRunComplete: boolean;
+  settings: {
+    masterVolume: number;
+    musicVolume: number;
+    sfxVolume: number;
+  };
+}
+
+export interface RankDetails {
+  rank: number;
+  progress: number;        // Current XP in this rank
+  toNextRank: number;      // Total XP needed for next rank
+  totalScore: number;
+  isMaxRank: boolean;
+}

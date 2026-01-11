@@ -1,26 +1,68 @@
-import React from 'react';
-import { Play, Settings, Zap } from 'lucide-react';
+
+import React, { useMemo } from 'react';
+import { Play, Settings, Zap, Trash2 } from 'lucide-react';
+import { SaveData } from '../types';
+import { calculateRankDetails } from '../utils/progression';
 
 interface MainMenuProps {
   onPlay: () => void;
   onUpgrades: () => void;
   onSettings: () => void;
+  saveData: SaveData;
+  onWipeSave: () => void;
 }
 
-export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettings }) => {
+export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettings, saveData, onWipeSave }) => {
+  
+  const rankInfo = useMemo(() => calculateRankDetails(saveData.totalScore), [saveData.totalScore]);
+  const progressPercent = rankInfo.isMaxRank ? 100 : (rankInfo.progress / rankInfo.toNextRank) * 100;
+
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center p-6 gap-12 animate-in fade-in duration-500 overflow-hidden bg-slate-950">
+    <div className="w-full h-full flex flex-col items-center justify-center p-6 gap-8 animate-in fade-in duration-500 overflow-hidden bg-slate-950 relative">
       <div className="absolute inset-0 z-0 opacity-20 bg-[radial-gradient(circle_at_50%_50%,#059669_0%,transparent_50%)]" />
       
+      {/* Title Section */}
       <div className="flex flex-col items-center gap-2 w-full z-10">
         <div className="px-4 py-2">
-            <h1 className="text-6xl md:text-8xl font-black text-transparent bg-clip-text bg-gradient-to-b from-green-400 to-green-700 tracking-tighter filter drop-shadow-[0_0_20px_rgba(34,197,94,0.6)] text-center font-mono">
+            <h1 
+                className="text-7xl md:text-9xl text-transparent bg-clip-text bg-gradient-to-b from-green-400 via-green-500 to-green-800 filter drop-shadow-[0_0_25px_rgba(34,197,94,0.6)] text-center pb-4"
+                style={{ fontFamily: '"Rubik Wet Paint", cursive' }}
+            >
             GOOPTRIS
             </h1>
             <div className="text-center text-green-500/60 font-mono tracking-[0.5em] text-sm mt-2 uppercase">Filtration Defense</div>
         </div>
       </div>
 
+      {/* Meta Progression HUD */}
+      <div className="w-full max-w-sm z-10 bg-slate-900/80 p-4 rounded-2xl border border-slate-800 backdrop-blur-md shadow-xl">
+          <div className="flex justify-between items-end mb-2">
+              <div>
+                  <div className="text-xs text-slate-500 uppercase font-bold tracking-wider">Operator Rank</div>
+                  <div className="text-3xl font-mono text-white font-bold leading-none">{rankInfo.rank}</div>
+              </div>
+              <div className="text-right">
+                   <div className="text-xs text-yellow-500 uppercase font-bold tracking-wider">Power Pts</div>
+                   <div className="text-xl font-mono text-yellow-400 font-bold leading-none">{saveData.powerUpPoints}</div>
+              </div>
+          </div>
+          
+          {/* XP Bar */}
+          <div className="w-full h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-700 relative">
+              <div 
+                  className="h-full bg-gradient-to-r from-green-600 to-green-400 transition-all duration-1000 ease-out"
+                  style={{ width: `${progressPercent}%` }}
+              />
+              {/* Gloss */}
+              <div className="absolute inset-0 bg-white/5" />
+          </div>
+          <div className="flex justify-between mt-1 text-[10px] font-mono text-slate-500">
+              <span>{Math.floor(rankInfo.progress).toLocaleString()} XP</span>
+              <span>{rankInfo.isMaxRank ? 'MAX' : `${Math.floor(rankInfo.toNextRank).toLocaleString()} NEXT`}</span>
+          </div>
+      </div>
+
+      {/* Buttons */}
       <div className="flex flex-col gap-4 w-full max-w-xs z-10">
         <button 
           onClick={onPlay}
@@ -48,8 +90,15 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettin
         </button>
       </div>
 
-      <div className="absolute bottom-6 text-slate-600 text-xs z-10 font-mono">
-        v1.0 &bull; REACTOR STABLE
+      {/* Footer / Dev Tools */}
+      <div className="absolute bottom-6 w-full flex flex-col items-center gap-4 z-10">
+          <button 
+            onClick={onWipeSave}
+            className="text-red-900/50 hover:text-red-500 text-xs font-mono uppercase tracking-widest flex items-center gap-2 px-3 py-1 rounded border border-transparent hover:border-red-900/50 transition-colors"
+          >
+             <Trash2 className="w-3 h-3" /> WIPE SAVE DATA (TESTING)
+          </button>
+          <div className="text-slate-600 text-xs font-mono">v1.1 &bull; REACTOR STABLE</div>
       </div>
     </div>
   );

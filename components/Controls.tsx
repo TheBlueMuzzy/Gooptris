@@ -1,76 +1,68 @@
-import React from 'react';
-import { GameState, PieceDefinition } from '../types';
+
+import React, { useEffect, useMemo, useState } from 'react';
+import { GameState } from '../types';
 import { SCORE_THRESHOLD } from '../constants';
 import { RefreshCw, Skull, Clock, Home } from 'lucide-react';
+import { calculateRankDetails } from '../utils/progression';
 
 interface ControlsProps {
   state: GameState;
-  onTapLeft: () => void;
-  onTapRight: () => void;
-  onSwipeUp: () => void;
-  onSwipeDown: () => void;
-  onSwipeLeft: () => void;
-  onSwipeRight: () => void;
   onRestart: () => void;
   onExit: () => void;
+  initialTotalScore: number;
 }
 
 export const Controls: React.FC<ControlsProps> = ({ 
-  state, onTapLeft, onTapRight, onSwipeUp, onSwipeDown, onSwipeLeft, onSwipeRight, onRestart, onExit 
+  state, onRestart, onExit, initialTotalScore 
 }) => {
-  const { score, gameOver, combo, cellsCleared, timeLeft, scoreBreakdown, gameStats } = state;
-
-  // Touch handling
-  const touchStart = React.useRef<{x: number, y: number} | null>(null);
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    touchStart.current = {
-      x: e.touches[0].clientX,
-      y: e.touches[0].clientY
-    };
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (!touchStart.current) return;
-    const endX = e.changedTouches[0].clientX;
-    const endY = e.changedTouches[0].clientY;
-    const dx = endX - touchStart.current.x;
-    const dy = endY - touchStart.current.y;
-    
-    touchStart.current = null;
-
-    const absDx = Math.abs(dx);
-    const absDy = Math.abs(dy);
-
-    if (Math.max(absDx, absDy) < 10) {
-      // Tap
-      const screenWidth = window.innerWidth;
-      if (endX < screenWidth / 2) onTapLeft();
-      else onTapRight();
-      return;
-    }
-
-    if (absDx > absDy) {
-      // Horizontal
-      if (dx > 30) onSwipeRight();
-      else if (dx < -30) onSwipeLeft();
-    } else {
-      // Vertical
-      if (dy > 30) onSwipeDown();
-      else if (dy < -30) onSwipeUp();
-    }
-  };
+  const { score, gameOver, combo, timeLeft, scoreBreakdown, gameStats } = state;
+  const [displayedProgress, setDisplayedProgress] = useState(0);
 
   // Timer Formatting
   const seconds = Math.ceil(timeLeft / 1000);
   const isLowTime = seconds <= 10;
   
-  // Meter Progress
+  // Meter Progress (In-Game Pressure/Time Bonus Meter)
   const progress = (score % SCORE_THRESHOLD) / SCORE_THRESHOLD;
 
   // Final Stats Calculation
   const finalTimeSeconds = Math.floor((Date.now() - (gameStats.startTime || Date.now())) / 1000);
   const bonusTimeSeconds = Math.floor(gameStats.totalBonusTime / 1000);
+
+  // --- Meta Progression Calculation for End Screen ---
+  // Start state: Where we were before this run
+  const startRankInfo = useMemo(() => calculateRankDetails(initialTotalScore), [initialTotalScore]);
+  // End state: Where we are now including this run's score
+  const endRankInfo = useMemo(() => calculateRankDetails(initialTotalScore + score), [initialTotalScore, score]);
+
+  // Effect to animate the progress bar on the Game Over screen
+  useEffect(() => {
+    if (gameOver) {
+        // Simple animation: 
+        // 1. Calculate percentage for the bar.
+        // If leveled up: We show full bar then new bar (simplified: just show end state for now to ensure robustness)
+        // OR: Calculate raw percentage based on current rank's requirement
+        
+        const startPct = startRankInfo.isMaxRank ? 100 : (startRankInfo.progress / startRankInfo.toNextRank) * 100;
+        const endPct = endRankInfo.isMaxRank ? 100 : (endRankInfo.progress / endRankInfo.toNextRank) * 100;
+        
+        // Start at previous percentage
+        setDisplayedProgress(startPct);
+
+        // After small delay, fill to new percentage
+        // Note: If we leveled up, visually handling the wrap-around is complex. 
+        // Strategy: If rank increased, animate to 100%.
+        // If same rank, animate to endPct.
+        
+        setTimeout(() => {
+            if (endRankInfo.rank > startRankInfo.rank) {
+                setDisplayedProgress(100);
+            } else {
+                setDisplayedProgress(endPct);
+            }
+        }, 100);
+    }
+  }, [gameOver, startRankInfo, endRankInfo]);
 
   return (
     <>
@@ -112,7 +104,7 @@ export const Controls: React.FC<ControlsProps> = ({
 
       {/* Game Over Screen */}
       {gameOver && (
-        <div className="absolute inset-0 bg-black/90 z-[60] flex flex-col items-center justify-center p-6 backdrop-blur-md animate-in fade-in duration-300 overflow-y-auto">
+        <div className="absolute inset-0 bg-black/90 z-[60] flex flex-col items-center justify-center p-6 backdrop-blur-md animate-in fade-in duration-300 overflow-y-auto pointer-events-auto">
            <div className="flex flex-col items-center w-full max-w-sm gap-6 my-auto">
                <div className="text-center">
                    <Skull className="w-16 h-16 text-red-600 mx-auto mb-4 animate-bounce" />
@@ -122,6 +114,39 @@ export const Controls: React.FC<ControlsProps> = ({
                
                <div className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-full h-1 bg-red-600" />
+                    
+                    {/* --- Rank Progress Section (New) --- */}
+                    <div className="bg-slate-950/50 rounded-lg p-3 mb-6 border border-slate-800">
+                        <div className="flex justify-between items-end mb-2">
+                             <div className="text-xs text-slate-400 uppercase font-bold">Operator Rank</div>
+                             <div className="text-2xl font-mono text-white font-bold leading-none flex items-center gap-2">
+                                <span className="text-slate-500 text-lg">{startRankInfo.rank}</span>
+                                {endRankInfo.rank > startRankInfo.rank && <span className="text-yellow-400 animate-pulse">→</span>}
+                                <span className={endRankInfo.rank > startRankInfo.rank ? "text-yellow-400" : ""}>{endRankInfo.rank}</span>
+                             </div>
+                        </div>
+                        <div className="w-full h-4 bg-slate-900 rounded-full overflow-hidden border border-slate-700 relative">
+                             {/* Base (Previous) Progress - Darker Green */}
+                             <div 
+                                className="absolute h-full bg-green-900" 
+                                style={{ width: `${startRankInfo.isMaxRank ? 100 : (startRankInfo.progress / startRankInfo.toNextRank) * 100}%` }} 
+                             />
+                             {/* Animated Fill - Bright Green */}
+                             <div 
+                                className="absolute h-full bg-green-500 transition-all duration-[2000ms] ease-out opacity-80"
+                                style={{ width: `${displayedProgress}%` }}
+                             />
+                        </div>
+                        <div className="flex justify-between mt-1 text-[10px] font-mono text-slate-500">
+                            <span>+{score.toLocaleString()} XP</span>
+                            {endRankInfo.rank > startRankInfo.rank ? (
+                                <span className="text-yellow-400 font-bold animate-pulse">RANK UP!</span>
+                            ) : (
+                                <span>{Math.floor(endRankInfo.toNextRank - endRankInfo.progress).toLocaleString()} TO NEXT</span>
+                            )}
+                        </div>
+                    </div>
+
                     <div className="text-center mb-6">
                         <div className="text-xs text-slate-500 uppercase tracking-widest mb-1">Final Score</div>
                         <div className="text-4xl font-mono text-white font-bold">{score.toLocaleString()}</div>
@@ -174,13 +199,6 @@ export const Controls: React.FC<ControlsProps> = ({
            </div>
         </div>
       )}
-
-      {/* Touch Area Overlay */}
-      <div 
-        className="absolute inset-0 z-0"
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-      />
       
       {/* Desktop Hints */}
       <div className="absolute bottom-4 left-0 right-0 text-center text-slate-500 text-xs pointer-events-none hidden md:block opacity-30 z-50 font-mono">

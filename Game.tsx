@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { GameState, GridCell, ActivePiece, PieceDefinition, PieceType, FallingBlock, ScoreBreakdown, GameStats } from './types';
 import { TOTAL_WIDTH, TOTAL_HEIGHT, VISIBLE_WIDTH, VISIBLE_HEIGHT, BASE_FILL_DURATION, PER_BLOCK_DURATION, GAME_COLORS, PIECES, INITIAL_TIME_MS, SCORE_THRESHOLD, TIME_BONUS_MS } from './constants';
@@ -20,9 +21,11 @@ const createGrid = (): GridCell[][] =>
 
 interface GameProps {
   onExit: () => void;
+  onRunComplete: (score: number) => void;
+  initialTotalScore: number;
 }
 
-const Game: React.FC<GameProps> = ({ onExit }) => {
+const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore }) => {
   const [grid, setGrid] = useState<GridCell[][]>(createGrid());
   const [activePiece, setActivePiece] = useState<ActivePiece | null>(null);
   const [storedPiece, setStoredPiece] = useState<PieceDefinition | null>(null);
@@ -49,6 +52,10 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
   const gameOverRef = useRef(false);
   const isPausedRef = useRef(false);
   const lockStartTimeRef = useRef<number | null>(null);
+  
+  // We capture this once on mount to ensure the "Before" state for animations is preserved
+  // even if the parent component updates the total score immediately on game over.
+  const initialTotalScoreRef = useRef(initialTotalScore);
 
   const lastTimeRef = useRef<number>(0);
   const heldKeys = useRef<Set<string>>(new Set());
@@ -70,6 +77,15 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
     startNewGame();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Run Completion Handler
+  // Triggers exactly once when gameOver becomes true
+  useEffect(() => {
+    if (gameOver) {
+        onRunComplete(score);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameOver]); // Depend ONLY on gameOver to ensure single firing
 
   // Countdown timer logic
   useEffect(() => {
@@ -363,6 +379,7 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
     setTimeLeft(prev => Math.max(0, prev - dt));
     if (state.timeLeft <= 0) {
         setGameOver(true);
+        // Handler triggered by useEffect now
         return;
     }
 
@@ -424,18 +441,11 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
                 // Safety check if floor is invalid (should be handled by collision check but being safe)
                 if (checkCollision(state.grid, finalPiece, state.boardOffset)) {
                    // If floor is invalid, it means we are colliding *into* it.
-                   // Usually shouldn't happen if checkCollision prevented movement.
-                   // But if it does, y-1 is safer.
-                   // However, for debugging the jump, let's leave as is or basic correction.
                 }
                 
                 const newGrid = mergePiece(state.grid, finalPiece);
-                // REMOVED getFloatingBlocks call here. 
-                // The piece should stay solid upon locking. Gravity only runs on tap.
                 
                 setGrid(newGrid);
-                // Don't add new falling blocks here
-                
                 setCombo(0);
                 
                 // CRITICAL FIX: Use current state for spawn to avoid stale closure issues
@@ -518,14 +528,9 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
     <div className="w-full h-full flex flex-col items-center justify-center relative touch-none">
       <Controls 
         state={gameState} 
-        onTapLeft={() => rotatePiece(false)}
-        onTapRight={() => rotatePiece(true)}
-        onSwipeLeft={() => moveBoard(1)}
-        onSwipeRight={() => moveBoard(-1)}
-        onSwipeUp={() => swapPiece()}
-        onSwipeDown={() => hardDrop()}
         onRestart={startNewGame}
         onExit={onExit}
+        initialTotalScore={initialTotalScoreRef.current}
       />
 
       {countdown !== null && !gameOver && (
@@ -536,6 +541,7 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
           </div>
       )}
 
+      {/* Rest of components... */}
       {isPaused && !gameOver && (
         <div className="absolute inset-0 bg-slate-950/80 z-40 flex flex-col items-center justify-center backdrop-blur-sm gap-6">
             <h2 className="text-4xl text-cyan-400 font-bold tracking-widest animate-pulse mb-4">PAUSED</h2>
@@ -560,7 +566,16 @@ const Game: React.FC<GameProps> = ({ onExit }) => {
         </div>
       )}
       
-      <GameBoard state={gameState} onBlockTap={handleBlockTap} />
+      <GameBoard 
+        state={gameState} 
+        onBlockTap={handleBlockTap} 
+        onTapLeft={() => rotatePiece(false)}
+        onTapRight={() => rotatePiece(true)}
+        onSwipeLeft={() => moveBoard(1)}
+        onSwipeRight={() => moveBoard(-1)}
+        onSwipeUp={() => swapPiece()}
+        onSwipeDown={() => hardDrop()}
+      />
       
     </div>
   );

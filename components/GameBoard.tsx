@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useRef } from 'react';
 import { GameState, Coordinate, FallingBlock, GridCell } from '../types';
 import { VISIBLE_WIDTH, VISIBLE_HEIGHT, COLORS, TOTAL_WIDTH, TOTAL_HEIGHT, BUFFER_HEIGHT, PER_BLOCK_DURATION } from '../constants';
 import { normalizeX, getGhostY } from '../utils/gameLogic';
@@ -6,6 +6,12 @@ import { normalizeX, getGhostY } from '../utils/gameLogic';
 interface GameBoardProps {
   state: GameState;
   onBlockTap: (x: number, y: number) => void;
+  onTapLeft: () => void;
+  onTapRight: () => void;
+  onSwipeUp: () => void;
+  onSwipeDown: () => void;
+  onSwipeLeft: () => void;
+  onSwipeRight: () => void;
 }
 
 const BLOCK_SIZE = 30; 
@@ -24,7 +30,9 @@ interface RenderableCell {
     isFalling?: boolean;
 }
 
-export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
+export const GameBoard: React.FC<GameBoardProps> = ({ 
+    state, onBlockTap, onTapLeft, onTapRight, onSwipeUp, onSwipeDown, onSwipeLeft, onSwipeRight 
+}) => {
   const { grid, boardOffset, activePiece, fallingBlocks } = state;
 
   // --- CYLINDRICAL PROJECTION LOGIC ---
@@ -54,37 +62,88 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
       return (VISIBLE_WIDTH / 2) + offsetFromCenter;
   };
 
-  const handleBoardClick = useCallback((e: React.MouseEvent<SVGSVGElement> | React.TouchEvent<SVGSVGElement>) => {
-    const svgRect = e.currentTarget.getBoundingClientRect();
-    let clientX, clientY;
+  // Touch / Mouse Handling
+  const touchStart = useRef<{x: number, y: number, time: number} | null>(null);
 
-    if ('touches' in e) {
-       clientX = e.changedTouches[0].clientX;
-       clientY = e.changedTouches[0].clientY;
-    } else {
-       clientX = e.clientX;
-       clientY = e.clientY;
-    }
+  const resolveClickOrTap = (clientX: number, clientY: number, target: Element) => {
+      const svgRect = target.getBoundingClientRect();
+      const relX = clientX - svgRect.left;
+      const relY = clientY - svgRect.top;
+      
+      const svgX = vbX + (relX / svgRect.width) * vbW;
+      const svgY = vbY + (relY / svgRect.height) * vbH;
 
-    const relX = clientX - svgRect.left;
-    const relY = clientY - svgRect.top;
-    
-    const svgX = vbX + (relX / svgRect.width) * vbW;
-    const svgY = vbY + (relY / svgRect.height) * vbH;
+      const rawVisX = getGridXFromScreen(svgX);
+      const visY = Math.floor(svgY / BLOCK_SIZE);
+      
+      // 1. Check if we hit a valid block
+      if (rawVisX >= 0) {
+          const visX = Math.floor(rawVisX);
+          const gridX = normalizeX(visX + boardOffset);
+          const gridY = visY + BUFFER_HEIGHT;
 
-    const rawVisX = getGridXFromScreen(svgX);
-    if (rawVisX < 0) return; 
+          if (visX >= 0 && visX < VISIBLE_WIDTH && visY >= 0 && visY < VISIBLE_HEIGHT) {
+             const cell = grid[gridY][gridX];
+             if (cell) {
+                 onBlockTap(gridX, gridY);
+                 return;
+             }
+          }
+      }
 
-    const visX = Math.floor(rawVisX);
-    const visY = Math.floor(svgY / BLOCK_SIZE);
-    
-    const gridX = normalizeX(visX + boardOffset);
-    const gridY = visY + BUFFER_HEIGHT;
+      // 2. If no block hit (or empty space), handle as Rotation Tap
+      const screenWidth = window.innerWidth;
+      if (clientX < screenWidth / 2) {
+          onTapLeft();
+      } else {
+          onTapRight();
+      }
+  };
 
-    if (visX >= 0 && visX < VISIBLE_WIDTH && visY >= 0 && visY < VISIBLE_HEIGHT) {
-        onBlockTap(gridX, gridY);
-    }
-  }, [boardOffset, onBlockTap, vbX, vbY, vbW, vbH]);
+  const handleTouchStart = (e: React.TouchEvent) => {
+      touchStart.current = {
+          x: e.touches[0].clientX,
+          y: e.touches[0].clientY,
+          time: Date.now()
+      };
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+      if (!touchStart.current) return;
+      
+      const endX = e.changedTouches[0].clientX;
+      const endY = e.changedTouches[0].clientY;
+      const dx = endX - touchStart.current.x;
+      const dy = endY - touchStart.current.y;
+      const dt = Date.now() - touchStart.current.time;
+      
+      touchStart.current = null;
+
+      const absDx = Math.abs(dx);
+      const absDy = Math.abs(dy);
+
+      // Tap Detection (minimal movement and short duration)
+      if (Math.max(absDx, absDy) < 15 && dt < 300) {
+          resolveClickOrTap(endX, endY, e.currentTarget);
+          return;
+      }
+
+      // Swipe Detection
+      if (absDx > absDy) {
+          if (dx > 30) onSwipeRight();
+          else if (dx < -30) onSwipeLeft();
+      } else {
+          if (dy > 30) onSwipeDown();
+          else if (dy < -30) onSwipeUp();
+      }
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+     // Optional: simple mouse click handling for desktop (taps only)
+     // Swipes via mouse drag not strictly necessary for MVP but helpful
+     // For now, assume Click = Tap
+     resolveClickOrTap(e.clientX, e.clientY, e.currentTarget);
+  };
 
   const style = useMemo(() => `
     .glow-stroke {
@@ -189,7 +248,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
       }
 
       // 2. Falling Blocks
-      // For falling blocks, we need to detect neighbors within the falling set dynamically
       const fallingMap = new Map<string, FallingBlock[]>();
       fallingBlocks.forEach(b => {
           if (!fallingMap.has(b.data.groupId)) fallingMap.set(b.data.groupId, []);
@@ -233,11 +291,13 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
       return map;
   }, [grid, boardOffset, fallingBlocks, vbX, vbY, vbW, vbH]);
 
-  // Active Piece logic (special case, not in map usually, but could be?)
-  // We'll treat active piece separately as it's not in the grid yet.
-
   return (
-    <div className="w-full h-full bg-slate-950 relative shadow-2xl border-x-4 border-slate-900 overflow-hidden select-none">
+    <div 
+        className="w-full h-full bg-slate-950 relative shadow-2xl border-x-4 border-slate-900 overflow-hidden select-none"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        onClick={handleMouseDown}
+    >
         {/* CRT Scanline */}
         <div className="absolute inset-0 pointer-events-none z-10 opacity-10 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))]" style={{backgroundSize: "100% 2px, 3px 100%"}} />
         
@@ -247,7 +307,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
             height="100%"
             viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`}
             preserveAspectRatio="xMidYMin meet"
-            onClick={handleBoardClick}
+            className="touch-none"
         >
             <defs>
                 {Array.from(groups.entries()).map(([gid, cells]) => (
@@ -311,8 +371,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
                         <g opacity={0.9} mask={`url(#mask-${gid})`}>
                             {cells.map((c, i) => {
                                 if (!c.cell || c.isFalling) {
-                                    // Falling blocks are solid filled usually? Or reuse animation? 
-                                    // Let's say falling blocks are full liquid.
                                     return (
                                         <rect 
                                             key={`liq-${i}`}
@@ -399,7 +457,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
                         const width = getScreenX(visX+1) - startX;
                         const yPos = (pieceGridY - BUFFER_HEIGHT) * BLOCK_SIZE;
 
-                        // Check connectivity inside piece
                         const neighbors = {
                             t: activePiece.cells.some(o => o.x === cell.x && o.y === cell.y - 1),
                             r: activePiece.cells.some(o => o.x === cell.x + 1 && o.y === cell.y),
@@ -425,9 +482,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
 
             {/* 4. Active Piece */}
             {activePiece && (() => {
-                // To achieve the same unified look for the active piece, we use the mask strategy again locally
                 const apCells = [];
-                // Collect render data
                 activePiece.cells.forEach((cell, idx) => {
                     const pieceGridX = normalizeX(activePiece.x + cell.x);
                     const pieceGridY = activePiece.y + cell.y;
@@ -455,7 +510,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
                 if (apCells.length === 0) return null;
                 const color = activePiece.definition.color;
                 
-                // Active Piece Bounds
                 let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
                 apCells.forEach(c => {
                     minX = Math.min(minX, c.screenX);
@@ -480,14 +534,12 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
                             </mask>
                         </defs>
                         
-                        {/* Shell */}
                         <rect 
                             x={minX} y={minY} width={maxX - minX} height={maxY - minY}
                             fill={color}
                             fillOpacity={0.2}
                             mask="url(#mask-active)"
                         />
-                        {/* Body (Solid for active piece) */}
                         <g opacity={0.8} mask="url(#mask-active)">
                              {apCells.map((c, i) => (
                                 <rect 
@@ -501,7 +553,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ state, onBlockTap }) => {
                              ))}
                         </g>
 
-                        {/* Contour & Highlight */}
                         {apCells.map((c, i) => (
                              <React.Fragment key={i}>
                                 <path 
