@@ -240,50 +240,80 @@ export const mergePiece = (grid: GridCell[][], piece: ActivePiece): GridCell[][]
 };
 
 export const getFloatingBlocks = (grid: GridCell[][], columnsToCheck?: number[]): { grid: GridCell[][], falling: FallingBlock[] } => {
+    // Implements "Sticky Gravity": 
+    // An entire connected Group falls only if NO block in that group is supported.
+    // A block is supported if it is on the floor (y=MAX) or on top of a supported group.
+
     const newGrid = grid.map(row => [...row]);
     const falling: FallingBlock[] = [];
     
-    // We process specified columns or all columns if none specified.
-    // Gravity is strictly vertical, so columns are independent.
-    const cols = columnsToCheck ? columnsToCheck : Array.from({length: TOTAL_WIDTH}, (_, i) => i);
-
-    for (const x of cols) {
-        const supportedY = new Set<number>();
-        
-        // 1. Mark supported blocks from bottom up
-        for (let y = TOTAL_HEIGHT - 1; y >= 0; y--) {
-            if (newGrid[y][x]) {
-                let isSupported = false;
-                
-                // Floor support
-                if (y === TOTAL_HEIGHT - 1) {
-                    isSupported = true;
-                } 
-                // Stack support (check block below)
-                else {
-                    // Check if the cell below exists AND is marked as supported
-                    // Since we scan bottom-up, the cell below is already processed.
-                    if (newGrid[y+1][x] && supportedY.has(y+1)) {
-                        isSupported = true;
-                    }
+    // 1. Map all Groups
+    const groups = new Map<string, Coordinate[]>();
+    const groupIds = new Set<string>();
+    
+    for (let y = 0; y < TOTAL_HEIGHT; y++) {
+        for (let x = 0; x < TOTAL_WIDTH; x++) {
+            const cell = newGrid[y][x];
+            if (cell) {
+                if (!groups.has(cell.groupId)) {
+                    groups.set(cell.groupId, []);
+                    groupIds.add(cell.groupId);
                 }
-                
-                if (isSupported) {
-                    supportedY.add(y);
-                }
+                groups.get(cell.groupId)!.push({ x, y });
             }
         }
+    }
+
+    // 2. Iteratively determine support
+    const supportedGroupIds = new Set<string>();
+    let changed = true;
+
+    while (changed) {
+        changed = false;
         
-        // 2. Any block present but not in supportedY is falling
-        for (let y = 0; y < TOTAL_HEIGHT; y++) {
-            if (newGrid[y][x] && !supportedY.has(y)) {
+        for (const gid of groupIds) {
+            if (supportedGroupIds.has(gid)) continue;
+            
+            const blocks = groups.get(gid)!;
+            let isSupported = false;
+            
+            for (const b of blocks) {
+                // Ground support
+                if (b.y === TOTAL_HEIGHT - 1) {
+                    isSupported = true;
+                    break;
+                }
+                
+                // Stack support (from a different, supported group)
+                const belowY = b.y + 1;
+                if (belowY < TOTAL_HEIGHT) {
+                    const belowCell = newGrid[belowY][b.x];
+                    if (belowCell && belowCell.groupId !== gid && supportedGroupIds.has(belowCell.groupId)) {
+                        isSupported = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (isSupported) {
+                supportedGroupIds.add(gid);
+                changed = true;
+            }
+        }
+    }
+
+    // 3. Mark unsupported groups as falling
+    for (const gid of groupIds) {
+        if (!supportedGroupIds.has(gid)) {
+            const blocks = groups.get(gid)!;
+            for (const b of blocks) {
                 falling.push({
-                    data: newGrid[y][x]!,
-                    x,
-                    y,
+                    data: newGrid[b.y][b.x]!,
+                    x: b.x,
+                    y: b.y,
                     velocity: 0
                 });
-                newGrid[y][x] = null;
+                newGrid[b.y][b.x] = null;
             }
         }
     }
