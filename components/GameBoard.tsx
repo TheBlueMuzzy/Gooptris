@@ -1,5 +1,5 @@
 
-import React, { useMemo, useCallback, useRef } from 'react';
+import React, { useMemo, useCallback, useRef, useState } from 'react';
 import { GameState, Coordinate, FallingBlock, GridCell } from '../types';
 import { VISIBLE_WIDTH, VISIBLE_HEIGHT, COLORS, TOTAL_WIDTH, TOTAL_HEIGHT, BUFFER_HEIGHT, PER_BLOCK_DURATION } from '../constants';
 import { normalizeX, getGhostY } from '../utils/gameLogic';
@@ -35,6 +35,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     state, onBlockTap, onTapLeft, onTapRight, onSwipeUp, onSwipeDown, onSwipeLeft, onSwipeRight 
 }) => {
   const { grid, boardOffset, activePiece, fallingBlocks, floatingTexts } = state;
+  const [highlightedGroupId, setHighlightedGroupId] = useState<string | null>(null);
 
   // --- CYLINDRICAL PROJECTION LOGIC ---
   const ANGLE_PER_COL = (2 * Math.PI) / TOTAL_WIDTH; 
@@ -63,10 +64,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       return (VISIBLE_WIDTH / 2) + offsetFromCenter;
   };
 
-  // Touch / Mouse Handling
+  // --- Input Handling ---
   const touchStart = useRef<{x: number, y: number, time: number} | null>(null);
 
-  const resolveClickOrTap = (clientX: number, clientY: number, target: Element) => {
+  // Helper to determine what was hit at specific screen coordinates
+  const getHitData = (clientX: number, clientY: number, target: Element) => {
       const svgRect = target.getBoundingClientRect();
       const relX = clientX - svgRect.left;
       const relY = clientY - svgRect.top;
@@ -77,7 +79,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       const rawVisX = getGridXFromScreen(svgX);
       const visY = Math.floor(svgY / BLOCK_SIZE);
       
-      // 1. Check if we hit a valid block
       if (rawVisX >= 0) {
           const visX = Math.floor(rawVisX);
           const gridX = normalizeX(visX + boardOffset);
@@ -85,19 +86,34 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
           if (visX >= 0 && visX < VISIBLE_WIDTH && visY >= 0 && visY < VISIBLE_HEIGHT) {
              const cell = grid[gridY][gridX];
-             if (cell) {
-                 onBlockTap(gridX, gridY);
-                 return;
-             }
+             return { type: 'BLOCK', x: gridX, y: gridY, cell };
           }
       }
-
-      // 2. If no block hit (or empty space), handle as Rotation Tap
+      
       const screenWidth = window.innerWidth;
-      if (clientX < screenWidth / 2) {
-          onTapLeft();
-      } else {
-          onTapRight();
+      const isLeft = clientX < screenWidth / 2;
+      return { type: 'EMPTY', side: isLeft ? 'LEFT' : 'RIGHT' };
+  };
+
+  const handleInputStart = (clientX: number, clientY: number, target: Element) => {
+      const hit = getHitData(clientX, clientY, target);
+      if (hit.type === 'BLOCK' && hit.cell) {
+          setHighlightedGroupId(hit.cell.groupId);
+      }
+  };
+
+  const handleInputEnd = (isTap: boolean, clientX: number, clientY: number, target: Element) => {
+      // Always clear highlight on release
+      setHighlightedGroupId(null);
+
+      if (isTap) {
+          const hit = getHitData(clientX, clientY, target);
+          if (hit.type === 'BLOCK' && hit.cell) {
+              onBlockTap(hit.x!, hit.y!);
+          } else if (hit.type === 'EMPTY') {
+              if (hit.side === 'LEFT') onTapLeft();
+              else onTapRight();
+          }
       }
   };
 
@@ -107,6 +123,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           y: e.touches[0].clientY,
           time: Date.now()
       };
+      handleInputStart(e.touches[0].clientX, e.touches[0].clientY, e.currentTarget);
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
@@ -123,11 +140,15 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       const absDx = Math.abs(dx);
       const absDy = Math.abs(dy);
 
-      // Tap Detection (minimal movement and short duration)
+      // Tap Detection
       if (Math.max(absDx, absDy) < 15 && dt < 300) {
-          resolveClickOrTap(endX, endY, e.currentTarget);
+          handleInputEnd(true, endX, endY, e.currentTarget);
           return;
       }
+      
+      // If we are here, it's a swipe (or a long press/drag that failed tap criteria)
+      // Ensure highlight is cleared
+      setHighlightedGroupId(null);
 
       // Swipe Detection
       if (absDx > absDy) {
@@ -139,11 +160,40 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       }
   };
 
+  // Mouse Handlers for Desktop
   const handleMouseDown = (e: React.MouseEvent) => {
-     // Optional: simple mouse click handling for desktop (taps only)
-     // Swipes via mouse drag not strictly necessary for MVP but helpful
-     // For now, assume Click = Tap
-     resolveClickOrTap(e.clientX, e.clientY, e.currentTarget);
+      touchStart.current = {
+          x: e.clientX,
+          y: e.clientY,
+          time: Date.now()
+      };
+      handleInputStart(e.clientX, e.clientY, e.currentTarget);
+  };
+
+  const handleMouseUp = (e: React.MouseEvent) => {
+      if (!touchStart.current) return;
+      const dt = Date.now() - touchStart.current.time;
+      const dx = Math.abs(e.clientX - touchStart.current.x);
+      const dy = Math.abs(e.clientY - touchStart.current.y);
+      touchStart.current = null;
+
+      // Mouse "Tap" is very loose on movement, strict on time? 
+      // Actually mouse swipes are rare, usually clicks. 
+      // Let's treat any mouse up with low movement as a tap.
+      const isTap = Math.max(dx, dy) < 15;
+      
+      // If it wasn't a tap (dragged), we might want swipe logic for mouse too
+      if (isTap) {
+        handleInputEnd(true, e.clientX, e.clientY, e.currentTarget);
+      } else {
+        // Drag logic for mouse swipes could go here if desired
+        setHighlightedGroupId(null);
+      }
+  };
+  
+  const handleMouseLeave = () => {
+      setHighlightedGroupId(null);
+      touchStart.current = null;
   };
 
   const style = useMemo(() => `
@@ -308,7 +358,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({
         className="w-full h-full bg-slate-950 relative shadow-2xl border-x-4 border-slate-900 overflow-hidden select-none"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
-        onClick={handleMouseDown}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
     >
         {/* CRT Scanline */}
         <div className="absolute inset-0 pointer-events-none z-10 opacity-10 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))]" style={{backgroundSize: "100% 2px, 3px 100%"}} />
@@ -359,6 +411,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                 if (cells.length === 0) return null;
                 const sample = cells[0];
                 const color = sample.color;
+                const isHighlighted = gid === highlightedGroupId;
 
                 // Calculate bounding box for the mask-rect
                 let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -418,6 +471,16 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                                 );
                             })}
                         </g>
+
+                        {/* Highlight Overlay if Pressed */}
+                        {isHighlighted && (
+                            <rect 
+                                x={minX} y={minY} width={maxX - minX} height={maxY - minY}
+                                fill="white"
+                                fillOpacity={0.3}
+                                mask={`url(#mask-${gid})`}
+                            />
+                        )}
 
                         {/* C. Contours (Glow) */}
                         {cells.map((c, i) => (
