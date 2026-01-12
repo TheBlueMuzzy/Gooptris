@@ -36,6 +36,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 }) => {
   const { grid, boardOffset, activePiece, fallingBlocks, floatingTexts } = state;
   const [highlightedGroupId, setHighlightedGroupId] = useState<string | null>(null);
+  const [shakingGroupId, setShakingGroupId] = useState<string | null>(null);
 
   // --- CYLINDRICAL PROJECTION LOGIC ---
   const ANGLE_PER_COL = (2 * Math.PI) / TOTAL_WIDTH; 
@@ -98,18 +99,33 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   const handleInputStart = (clientX: number, clientY: number, target: Element) => {
       const hit = getHitData(clientX, clientY, target);
       if (hit.type === 'BLOCK' && hit.cell) {
-          setHighlightedGroupId(hit.cell.groupId);
+          const totalDuration = hit.cell.groupSize * PER_BLOCK_DURATION;
+          const elapsed = Date.now() - hit.cell.timestamp;
+          
+          if (elapsed < totalDuration) {
+              // Not ready yet -> Shake
+              setShakingGroupId(hit.cell.groupId);
+              // Clear shake after animation duration
+              setTimeout(() => setShakingGroupId(prev => prev === hit.cell!.groupId ? null : prev), 300);
+          } else {
+              // Ready -> Highlight
+              setHighlightedGroupId(hit.cell.groupId);
+          }
       }
   };
 
   const handleInputEnd = (isTap: boolean, clientX: number, clientY: number, target: Element) => {
-      // Always clear highlight on release
+      // Capture current highlight before clearing
+      const activeGroup = highlightedGroupId;
       setHighlightedGroupId(null);
 
       if (isTap) {
           const hit = getHitData(clientX, clientY, target);
           if (hit.type === 'BLOCK' && hit.cell) {
-              onBlockTap(hit.x!, hit.y!);
+              // Only pop if this specific group was highlighted (meaning it was ready at start of touch)
+              if (activeGroup === hit.cell.groupId) {
+                  onBlockTap(hit.x!, hit.y!);
+              }
           } else if (hit.type === 'EMPTY') {
               if (hit.side === 'LEFT') onTapLeft();
               else onTapRight();
@@ -209,12 +225,20 @@ export const GameBoard: React.FC<GameBoardProps> = ({
         0% { transform: translateY(0) scale(1); opacity: 1; }
         100% { transform: translateY(-40px) scale(1.5); opacity: 0; }
     }
+    @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        25% { transform: translateX(-3px); }
+        75% { transform: translateX(3px); }
+    }
     .floating-score {
         animation: floatUp 1s ease-out forwards;
         font-family: monospace;
         font-weight: 900;
         text-shadow: 0px 2px 4px rgba(0,0,0,0.8);
         pointer-events: none;
+    }
+    .shake-anim {
+        animation: shake 0.3s cubic-bezier(.36,.07,.19,.97) both;
     }
   `, []);
 
@@ -412,6 +436,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                 const sample = cells[0];
                 const color = sample.color;
                 const isHighlighted = gid === highlightedGroupId;
+                const isShaking = gid === shakingGroupId;
 
                 // Calculate bounding box for the mask-rect
                 let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -423,7 +448,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                 });
 
                 return (
-                    <g key={`group-${gid}`}>
+                    <g key={`group-${gid}`} className={isShaking ? "shake-anim" : ""}>
                         {/* A. Unified Shell */}
                         <rect 
                             x={minX} y={minY} width={maxX - minX} height={maxY - minY}
