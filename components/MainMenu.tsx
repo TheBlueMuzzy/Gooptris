@@ -15,6 +15,10 @@ interface MainMenuProps {
 export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettings, saveData, onWipeSave }) => {
   const [confirmWipe, setConfirmWipe] = useState(false);
   
+  // Local state for button labels to handle "Coming Soon" flash
+  const [systemsLabel, setSystemsLabel] = useState("SYSTEMS");
+  const [configLabel, setConfigLabel] = useState("CONFIG");
+  
   // Calculate directly from props every render to avoid stale memoization issues
   const rankInfo = calculateRankDetails(saveData.totalScore);
   const progressPercent = rankInfo.isMaxRank ? 100 : (rankInfo.progress / rankInfo.toNextRank) * 100;
@@ -28,6 +32,16 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettin
       // Reset confirmation state after 3 seconds if not clicked again
       setTimeout(() => setConfirmWipe(false), 3000);
     }
+  };
+
+  const handleSystemsClick = () => {
+      setSystemsLabel("COMING SOON");
+      setTimeout(() => setSystemsLabel("SYSTEMS"), 2000);
+  };
+
+  const handleConfigClick = () => {
+      setConfigLabel("COMING SOON");
+      setTimeout(() => setConfigLabel("CONFIG"), 2000);
   };
 
   return (
@@ -87,19 +101,19 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettin
         </button>
 
         <button 
-          onClick={onUpgrades}
-          className="flex items-center justify-center gap-3 px-8 py-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl border border-slate-700 hover:border-slate-600 transition-all active:scale-95 text-lg"
+          onClick={handleSystemsClick}
+          className="flex items-center justify-center gap-3 px-8 py-4 bg-slate-900/50 text-slate-500 font-bold rounded-xl border border-slate-800 transition-all active:scale-95 text-lg cursor-pointer hover:bg-slate-900"
         >
-           <Zap className="w-5 h-5 text-yellow-400" /> 
-           <span>SYSTEMS</span>
+           <Zap className={`w-5 h-5 ${systemsLabel === 'SYSTEMS' ? 'text-slate-600' : 'text-yellow-500'}`} /> 
+           <span>{systemsLabel}</span>
         </button>
 
         <button 
-          onClick={onSettings}
-          className="flex items-center justify-center gap-3 px-8 py-4 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 font-bold rounded-xl border border-slate-800 hover:border-slate-700 transition-all active:scale-95 text-lg"
+          onClick={handleConfigClick}
+          className="flex items-center justify-center gap-3 px-8 py-4 bg-slate-900/50 text-slate-500 font-bold rounded-xl border border-slate-800 transition-all active:scale-95 text-lg cursor-pointer hover:bg-slate-900"
         >
-           <Settings className="w-5 h-5" /> 
-           <span>CONFIG</span>
+           <Settings className={`w-5 h-5 ${configLabel === 'CONFIG' ? 'text-slate-600' : 'text-cyan-500'}`} /> 
+           <span>{configLabel}</span>
         </button>
       </div>
 
@@ -116,7 +130,13 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettin
              {confirmWipe ? <AlertTriangle className="w-3 h-3 animate-pulse" /> : <Trash2 className="w-3 h-3" />}
              {confirmWipe ? "CONFIRM WIPE?" : "WIPE SAVE DATA (TESTING)"}
           </button>
-          <div className="text-slate-600 text-xs font-mono">v1.1 &bull; REACTOR STABLE</div>
+          
+          <div className="flex flex-col items-center gap-1 opacity-60">
+            <div className="text-slate-600 text-xs font-mono">v1.1 &bull; REACTOR STABLE</div>
+            <div className="text-slate-500 text-[10px] font-mono tracking-widest">
+                MuzzyMade &copy; 2026
+            </div>
+          </div>
       </div>
     </div>
   );
