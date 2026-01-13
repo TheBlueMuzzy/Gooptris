@@ -76,33 +76,8 @@ class AudioSystem {
   // --- BGM ---
 
   public startMusic() {
-    if (!this.ctx || !this.musicGain) return;
+    // Background audio disabled by design preference
     this.stopMusic();
-
-    // Dark Drone Logic
-    // 1. Low sine wave
-    const osc = this.ctx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.value = 55; // Low A
-    
-    // 2. LFO to modulate amplitude (throbbing)
-    const lfo = this.ctx.createOscillator();
-    lfo.type = 'sine';
-    lfo.frequency.value = 0.5; // Slow throb
-
-    const lfoGain = this.ctx.createGain();
-    lfoGain.gain.value = 50.0;
-
-    lfo.connect(lfoGain);
-    // lfoGain.connect(osc.frequency); // FM Synthesis style
-    
-    osc.connect(this.musicGain);
-    
-    osc.start();
-    lfo.start();
-
-    this.droneOsc = osc;
-    this.droneLfo = lfo;
   }
 
   public stopMusic() {
@@ -117,12 +92,7 @@ class AudioSystem {
   }
 
   public setPressure(intensity: number) {
-      // intensity 0 to 1 (1 is high pressure/low time)
-      if (this.droneOsc && this.ctx) {
-          const now = this.ctx.currentTime;
-          // Pitch up slightly
-          this.droneOsc.frequency.setTargetAtTime(55 + (intensity * 55), now, 2);
-      }
+      // Background audio is disabled, so pressure modulation is no-op
   }
 
   // --- SFX ---
@@ -208,8 +178,24 @@ class AudioSystem {
     if (!this.ctx || !this.sfxGain) return;
     const t = this.ctx.currentTime;
     
-    // Noise burst
-    const bufferSize = this.ctx.sampleRate * 0.1; // 0.1 sec
+    // 1. "Gloopy" Body (Low Sine Drop)
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    // Start mid, drop low quickly for the "thud/squish" body
+    osc.frequency.setValueAtTime(350, t);
+    osc.frequency.exponentialRampToValueAtTime(60, t + 0.15);
+    
+    const oscGain = this.ctx.createGain();
+    oscGain.gain.setValueAtTime(0.4, t);
+    oscGain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+    
+    osc.connect(oscGain);
+    oscGain.connect(this.sfxGain);
+    osc.start(t);
+    osc.stop(t + 0.15);
+
+    // 2. Liquid Texture (Resonant Filtered Noise)
+    const bufferSize = this.ctx.sampleRate * 0.2;
     const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < bufferSize; i++) {
@@ -217,28 +203,22 @@ class AudioSystem {
     }
     const noise = this.ctx.createBufferSource();
     noise.buffer = buffer;
-    
-    const noiseGain = this.ctx.createGain();
-    noiseGain.gain.setValueAtTime(0.5, t);
-    noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
-    
-    noise.connect(noiseGain);
-    noiseGain.connect(this.sfxGain);
-    noise.start(t);
 
-    // Kick
-    const osc = this.ctx.createOscillator();
-    osc.frequency.setValueAtTime(150, t);
-    osc.frequency.exponentialRampToValueAtTime(40, t + 0.15);
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.Q.value = 8; // High resonance for watery sound
+    filter.frequency.setValueAtTime(800, t);
+    filter.frequency.exponentialRampToValueAtTime(200, t + 0.15);
+
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.3, t);
+    noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+
+    noise.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(this.sfxGain);
     
-    const kickGain = this.ctx.createGain();
-    kickGain.gain.setValueAtTime(0.5, t);
-    kickGain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
-    
-    osc.connect(kickGain);
-    kickGain.connect(this.sfxGain);
-    osc.start(t);
-    osc.stop(t + 0.15);
+    noise.start(t);
   }
 
   public playGameOver() {
