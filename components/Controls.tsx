@@ -94,36 +94,31 @@ export const Controls: React.FC<ControlsProps> = ({
           <div className="absolute inset-0 z-30 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_40%,rgba(100,0,0,0.4)_100%)] animate-pulse" />
       )}
 
-      {/* HUD Layer - Slimmed down */}
-      <div className="absolute top-0 left-0 right-0 p-2 pointer-events-none z-50">
-          <div className={`w-full bg-slate-900/90 p-2 rounded-xl border backdrop-blur-md shadow-2xl transition-colors flex flex-col ${isHighPressure ? 'border-red-500/50 shadow-red-900/20' : 'border-slate-700/50 shadow-black/50'}`}>
-              
-              <div className="flex justify-between items-start px-2 w-full">
-                  
-                  {/* LEFT: Pressure (Swapped) */}
-                  <div className="flex flex-col items-start min-w-[100px]">
-                      <span className="text-[9px] uppercase font-bold tracking-widest mb-0.5 text-slate-400">Pressure</span>
-                      <div className={`flex items-baseline gap-1 ${isHighPressure ? 'text-red-500 animate-pulse' : 'text-slate-200'}`}>
-                          <Activity className="w-4 h-4 opacity-70" />
-                          <span className="text-3xl font-mono font-bold leading-none">{(pressureRatio * 100).toFixed(0)}%</span>
-                      </div>
-                  </div>
+      {/* HUD Layer - Minimalist / No Bar */}
+      <div className="absolute top-0 left-0 right-0 p-4 pointer-events-none z-50 flex justify-between items-start">
+          
+          {/* LEFT: Pressure */}
+          <div className="flex flex-col items-start drop-shadow-[0_2px_3px_rgba(0,0,0,0.9)]">
+              <span className="text-[10px] uppercase font-bold tracking-widest mb-0.5 text-slate-400/90">Pressure</span>
+              <div className={`flex items-baseline gap-1 ${isHighPressure ? 'text-red-500 animate-pulse' : 'text-slate-200'}`}>
+                  <Activity className="w-5 h-5 opacity-90" />
+                  <span className="text-4xl font-mono font-black leading-none tracking-tighter">{(pressureRatio * 100).toFixed(0)}%</span>
+              </div>
+          </div>
 
-                  {/* CENTER: Combo (Optimized Position) */}
-                  {combo > 1 && (
-                      <div className="absolute left-1/2 -translate-x-1/2 top-4">
-                          <div className="text-lg text-yellow-400 animate-bounce font-black tracking-wider whitespace-nowrap drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)]">
-                              x{combo} SURGE
-                          </div>
-                      </div>
-                  )}
-
-                  {/* RIGHT: Score */}
-                  <div className="flex flex-col items-end min-w-[100px]">
-                      <span className="text-[9px] text-green-500 uppercase font-bold tracking-widest mb-0.5">Score</span>
-                      <span className="text-3xl font-mono text-green-400 leading-none tracking-tight shadow-green-500/10 drop-shadow-sm">{score.toLocaleString()}</span>
+          {/* CENTER: Combo */}
+          {combo > 1 && (
+              <div className="absolute left-1/2 -translate-x-1/2 top-14 md:top-8">
+                  <div className="text-2xl text-yellow-400 animate-bounce font-black tracking-wider whitespace-nowrap drop-shadow-[0_4px_4px_rgba(0,0,0,0.9)] stroke-black">
+                      x{combo} SURGE
                   </div>
               </div>
+          )}
+
+          {/* RIGHT: Score */}
+          <div className="flex flex-col items-end drop-shadow-[0_2px_3px_rgba(0,0,0,0.9)]">
+              <span className="text-[10px] text-green-500/90 uppercase font-bold tracking-widest mb-0.5">Score</span>
+              <span className="text-4xl font-mono text-green-400 font-black leading-none tracking-tighter shadow-green-500/10">{score.toLocaleString()}</span>
           </div>
       </div>
 
@@ -162,7 +157,6 @@ export const Controls: React.FC<ControlsProps> = ({
                         </div>
                         
                         <div className="w-full h-4 bg-slate-900 rounded-full overflow-hidden border border-slate-700 relative">
-                             {/* REMOVED transition-all/width transition to prevent bar from sliding backwards when wrapping to 0 on level up */}
                              <div 
                                 className={`absolute h-full transition-colors duration-200 ease-out ${levelUpTrigger ? 'bg-yellow-400' : 'bg-green-500'}`}
                                 style={{ width: `${visualBarPercent}%` }}
