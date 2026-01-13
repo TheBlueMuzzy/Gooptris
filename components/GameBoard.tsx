@@ -49,6 +49,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   const pressureHue = Math.max(0, 120 * (1 - pressureRatio)); // 120 (Green) -> 0 (Red)
   const pressureColor = `hsla(${pressureHue}, 100%, 50%, 0.15)`; // Low opacity
 
+  // Calculate Visual Water Height to match Gameplay Logic
+  // At Ratio 0: Height is 1 row (row 18)
+  // At Ratio 1: Height is 16 rows (rows 3-18)
+  const waterHeightBlocks = 1 + (pressureRatio * (VISIBLE_HEIGHT - 1));
+
   // --- CYLINDRICAL PROJECTION LOGIC ---
   const ANGLE_PER_COL = (2 * Math.PI) / TOTAL_WIDTH; 
   const CYL_RADIUS = BLOCK_SIZE / ANGLE_PER_COL; 
@@ -61,6 +66,10 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   const vbY = 0;
   const vbW = projectedHalfWidth * 2;
   const vbH = VISIBLE_HEIGHT * BLOCK_SIZE;
+
+  // Visual Water positioning
+  const waterHeightPx = waterHeightBlocks * BLOCK_SIZE;
+  const waterTopY = vbH - waterHeightPx;
 
   const getScreenX = (visX: number) => {
       const centerCol = VISIBLE_WIDTH / 2;
@@ -115,7 +124,15 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           const totalDuration = hit.cell.groupSize * PER_BLOCK_DURATION;
           const elapsed = Date.now() - hit.cell.timestamp;
           
-          if (elapsed < totalDuration) {
+          // PRESSURE CHECK: Matches Game.tsx logic
+          const thresholdY = (TOTAL_HEIGHT - 1) - (pressureRatio * (VISIBLE_HEIGHT - 1));
+          
+          if (hit.cell.groupMinY < thresholdY) {
+              // Not submerged enough -> Reject
+              setShakingGroupId(hit.cell.groupId);
+              audio.playReject(); 
+              setTimeout(() => setShakingGroupId(prev => prev === hit.cell!.groupId ? null : prev), 300);
+          } else if (elapsed < totalDuration) {
               // Not ready yet -> Shake & Sound
               setShakingGroupId(hit.cell.groupId);
               audio.playReject(); 
@@ -476,11 +493,19 @@ export const GameBoard: React.FC<GameBoardProps> = ({
             {/* 0. Pressure Fluid Background Fill */}
             <rect 
                 x={vbX} 
-                y={vbH * (1 - pressureRatio)} 
+                y={waterTopY} 
                 width={vbW} 
-                height={vbH * pressureRatio} 
+                height={waterHeightPx} 
                 fill={pressureColor}
-                className="transition-all duration-300 ease-out" // Slight smooth when jumping, though frame updates are main driver
+                className="transition-all duration-300 ease-out" 
+            />
+            
+            {/* Water Line Top */}
+            <line 
+                x1={vbX} y1={waterTopY} x2={vbX + vbW} y2={waterTopY}
+                stroke={pressureColor.replace('0.15', '0.6')}
+                strokeWidth="2"
+                strokeDasharray="4 4"
             />
 
             {/* 1. Background Grid */}

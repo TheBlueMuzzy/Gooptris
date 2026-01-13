@@ -370,11 +370,25 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
   }, [spawnNewPiece]);
 
   const handleBlockTap = useCallback((x: number, y: number) => {
-     const { gameOver, isPaused, countdown, grid, boardOffset, combo } = stateRef.current;
+     const { gameOver, isPaused, countdown, grid, boardOffset, combo, timeLeft } = stateRef.current;
      if (gameOver || isPaused || countdown !== null) return;
 
      const cell = grid[y][x];
      if (!cell) return;
+     
+     // PRESSURE LOGIC:
+     // Allow popping if the group reaches down into the "high pressure" zone.
+     // Base zone is the bottom row (18). 
+     // As pressure increases (timeLeft decreases), the threshold moves UP.
+     const pressureRatio = Math.max(0, 1 - (timeLeft / maxTimeRef.current));
+     const thresholdY = (TOTAL_HEIGHT - 1) - (pressureRatio * (VISIBLE_HEIGHT - 1));
+     
+     // Check if the group's HIGHEST point (smallest Y) is below (greater than) the threshold line
+     // This ensures the entire group (or at least its top block) is submerged.
+     if (cell.groupMinY < thresholdY) {
+         audio.playReject();
+         return;
+     }
 
      const now = Date.now();
      const totalDuration = cell.groupSize * PER_BLOCK_DURATION;
