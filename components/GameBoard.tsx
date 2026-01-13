@@ -92,12 +92,38 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
   // Helper to determine what was hit at specific screen coordinates
   const getHitData = (clientX: number, clientY: number, target: Element) => {
-      const svgRect = target.getBoundingClientRect();
-      const relX = clientX - svgRect.left;
-      const relY = clientY - svgRect.top;
+      // We must treat the target as an HTMLElement to access client/offset properties
+      const container = target as HTMLElement;
+      const rect = container.getBoundingClientRect();
+
+      // Accounts for border widths (clientLeft/Top) to get the true content box origin
+      const borderLeft = container.clientLeft || 0;
+      const borderTop = container.clientTop || 0;
+
+      // Relative to content box
+      const relX = clientX - rect.left - borderLeft;
+      const relY = clientY - rect.top - borderTop;
       
-      const svgX = vbX + (relX / svgRect.width) * vbW;
-      const svgY = vbY + (relY / svgRect.height) * vbH;
+      const contentW = container.clientWidth;
+      const contentH = container.clientHeight;
+      
+      // Calculate scale based on content dimensions, not bounding rect (which includes borders)
+      const scaleX = contentW / vbW;
+      const scaleY = contentH / vbH;
+      const scale = Math.min(scaleX, scaleY);
+
+      const renderedW = vbW * scale;
+      
+      // xMidYMin: Center X, Top Y
+      const offsetX = (contentW - renderedW) / 2;
+      const offsetY = 0; 
+
+      const viewX = relX - offsetX;
+      const viewY = relY - offsetY;
+
+      // Convert back to SVG coordinates
+      const svgX = vbX + viewX / scale;
+      const svgY = vbY + viewY / scale;
 
       const rawVisX = getGridXFromScreen(svgX);
       const visY = Math.floor(svgY / BLOCK_SIZE);
