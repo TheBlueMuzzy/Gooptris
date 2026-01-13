@@ -318,14 +318,50 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
             spawnTimestamp: Date.now(),
             startSpawnY: 1
           };
-          newPiece.x = getCenteredSpawnX(boardOffset);
-          newPiece.y = 1;
+          
+          // Attempt 1: Swap in-place
+          newPiece.x = activePiece.x;
+          newPiece.y = activePiece.y;
 
-          if (!checkCollision(grid, newPiece, boardOffset)) {
-              setActivePiece(newPiece);
-              stateRef.current.activePiece = newPiece; // Manual Sync
-              setCanSwap(false);
+          if (checkCollision(grid, newPiece, boardOffset)) {
+              // Collision handling: Try simple nudges
+              let placed = false;
+              
+              // Nudge Up
+              const upPiece = { ...newPiece, y: newPiece.y - 1 };
+              if (!checkCollision(grid, upPiece, boardOffset)) {
+                  newPiece.y = upPiece.y;
+                  placed = true;
+              } 
+              
+              if (!placed) {
+                  // Nudge Left
+                  const leftPiece = { ...newPiece, x: normalizeX(newPiece.x - 1) };
+                  if (!checkCollision(grid, leftPiece, boardOffset)) {
+                      newPiece.x = leftPiece.x;
+                      placed = true;
+                  }
+              }
+
+              if (!placed) {
+                  // Nudge Right
+                  const rightPiece = { ...newPiece, x: normalizeX(newPiece.x + 1) };
+                  if (!checkCollision(grid, rightPiece, boardOffset)) {
+                      newPiece.x = rightPiece.x;
+                      placed = true;
+                  }
+              }
+              
+              // Fallback to top spawn if cannot fit nearby
+              if (!placed) {
+                  newPiece.x = getCenteredSpawnX(boardOffset);
+                  newPiece.y = 1;
+              }
           }
+
+          setActivePiece(newPiece);
+          stateRef.current.activePiece = newPiece; // Manual Sync
+          setCanSwap(false);
       } else {
           setStoredPiece(currentDef);
           spawnNewPiece(); 
