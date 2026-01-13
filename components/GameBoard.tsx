@@ -497,7 +497,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                 width={vbW} 
                 height={waterHeightPx} 
                 fill={pressureColor}
-                className="transition-all duration-300 ease-out" 
             />
             
             {/* Water Line Top */}
