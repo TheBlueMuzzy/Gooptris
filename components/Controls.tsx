@@ -1,8 +1,7 @@
 
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { GameState } from '../types';
-import { SCORE_THRESHOLD } from '../constants';
-import { RefreshCw, Skull, Clock, Home, Zap } from 'lucide-react';
+import { RefreshCw, Skull, Home, Zap, Activity } from 'lucide-react';
 import { calculateRankDetails } from '../utils/progression';
 
 interface ControlsProps {
@@ -10,20 +9,20 @@ interface ControlsProps {
   onRestart: () => void;
   onExit: () => void;
   initialTotalScore: number;
+  maxTime: number; // Added to calculate pressure percentage
 }
 
 export const Controls: React.FC<ControlsProps> = ({ 
-  state, onRestart, onExit, initialTotalScore 
+  state, onRestart, onExit, initialTotalScore, maxTime 
 }) => {
   const { score, gameOver, combo, timeLeft, scoreBreakdown, gameStats } = state;
   
-  // Timer Formatting
-  const seconds = Math.ceil(timeLeft / 1000);
-  const isLowTime = seconds <= 10;
+  // Timer Formatting (Pressure)
+  // Low time means High Pressure
+  const pressureRatio = Math.max(0, Math.min(1, 1 - (timeLeft / maxTime)));
+  const isHighPressure = pressureRatio > 0.8;
+  const isCriticalPressure = pressureRatio > 0.9;
   
-  // Meter Progress (In-Game Pressure/Time Bonus Meter)
-  const pressureProgress = (score % SCORE_THRESHOLD) / SCORE_THRESHOLD;
-
   // Final Stats Calculation
   const finalTimeSeconds = Math.floor((Date.now() - (gameStats.startTime || Date.now())) / 1000);
   const bonusTimeSeconds = Math.floor(gameStats.totalBonusTime / 1000);
@@ -90,38 +89,40 @@ export const Controls: React.FC<ControlsProps> = ({
 
   return (
     <>
-      {/* Vignette Layer */}
-      <div className="absolute inset-0 z-30 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_40%,rgba(0,10,0,0.85)_100%)]" />
+      {/* Vignette Layer for Critical States */}
+      {isCriticalPressure && (
+          <div className="absolute inset-0 z-30 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_40%,rgba(100,0,0,0.4)_100%)] animate-pulse" />
+      )}
 
-      {/* HUD Layer - Stretched across top, z-50 to sit above vignettes */}
-      <div className="absolute top-0 left-0 right-0 p-3 pointer-events-none z-50">
-          <div className={`w-full bg-slate-900/95 p-3 rounded-xl border backdrop-blur-md shadow-2xl transition-colors flex flex-col gap-2 ${isLowTime ? 'border-red-500/50 shadow-red-900/20' : 'border-green-800/80 shadow-black/50'}`}>
+      {/* HUD Layer - Slimmed down */}
+      <div className="absolute top-0 left-0 right-0 p-2 pointer-events-none z-50">
+          <div className={`w-full bg-slate-900/90 p-2 rounded-xl border backdrop-blur-md shadow-2xl transition-colors flex flex-col ${isHighPressure ? 'border-red-500/50 shadow-red-900/20' : 'border-slate-700/50 shadow-black/50'}`}>
               
-              <div className="flex justify-between items-end px-2">
-                  <div className="flex flex-col">
-                      <span className="text-[10px] text-green-500 uppercase font-bold tracking-widest mb-0.5">Purge Score</span>
-                      <span className="text-3xl font-mono text-green-400 leading-none tracking-tight shadow-green-500/10 drop-shadow-sm">{score.toLocaleString()}</span>
-                  </div>
+              <div className="flex justify-between items-start px-2 w-full">
                   
-                  {combo > 1 && <div className="text-lg text-yellow-400 animate-bounce font-black tracking-wider text-center px-4">x{combo} SURGE</div>}
-
-                  <div className="flex flex-col items-end">
-                      <span className="text-[10px] text-green-500 uppercase font-bold tracking-widest mb-0.5">Pressure</span>
-                      <div className={`flex items-baseline gap-1 ${isLowTime ? 'text-red-500 animate-pulse' : 'text-slate-200'}`}>
-                          <Clock className="w-3 h-3 opacity-70" />
-                          <span className="text-2xl font-mono font-bold leading-none">{seconds}s</span>
+                  {/* LEFT: Pressure (Swapped) */}
+                  <div className="flex flex-col items-start min-w-[100px]">
+                      <span className="text-[9px] uppercase font-bold tracking-widest mb-0.5 text-slate-400">Pressure</span>
+                      <div className={`flex items-baseline gap-1 ${isHighPressure ? 'text-red-500 animate-pulse' : 'text-slate-200'}`}>
+                          <Activity className="w-4 h-4 opacity-70" />
+                          <span className="text-3xl font-mono font-bold leading-none">{(pressureRatio * 100).toFixed(0)}%</span>
                       </div>
                   </div>
-              </div>
-              
-              {/* 10k Progress Meter (In-Game) */}
-              <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-green-900 relative">
-                  <div 
-                      className={`h-full transition-all duration-300 ${isLowTime ? 'bg-red-500' : 'bg-gradient-to-r from-green-700 to-green-400'}`}
-                      style={{ width: `${pressureProgress * 100}%` }}
-                  />
-                  {/* Stripes */}
-                  <div className="absolute inset-0 opacity-20 bg-[linear-gradient(45deg,rgba(0,0,0,0.5)_25%,transparent_25%,transparent_50%,rgba(0,0,0,0.5)_50%,rgba(0,0,0,0.5)_75%,transparent_75%,transparent)] bg-[length:10px_10px]" />
+
+                  {/* CENTER: Combo (Optimized Position) */}
+                  {combo > 1 && (
+                      <div className="absolute left-1/2 -translate-x-1/2 top-4">
+                          <div className="text-lg text-yellow-400 animate-bounce font-black tracking-wider whitespace-nowrap drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)]">
+                              x{combo} SURGE
+                          </div>
+                      </div>
+                  )}
+
+                  {/* RIGHT: Score */}
+                  <div className="flex flex-col items-end min-w-[100px]">
+                      <span className="text-[9px] text-green-500 uppercase font-bold tracking-widest mb-0.5">Score</span>
+                      <span className="text-3xl font-mono text-green-400 leading-none tracking-tight shadow-green-500/10 drop-shadow-sm">{score.toLocaleString()}</span>
+                  </div>
               </div>
           </div>
       </div>
@@ -133,7 +134,7 @@ export const Controls: React.FC<ControlsProps> = ({
                <div className="text-center">
                    <Skull className="w-16 h-16 text-red-600 mx-auto mb-4 animate-bounce" />
                    <h1 className="text-4xl font-black text-white tracking-tighter mb-1 font-mono uppercase text-red-500">SYSTEM FAILURE</h1>
-                   <p className="text-slate-500 font-mono text-sm tracking-widest border-t border-b border-slate-800 py-1">{timeLeft <= 0 ? "PRESSURE BREACH" : "OVERFLOW DETECTED"}</p>
+                   <p className="text-slate-500 font-mono text-sm tracking-widest border-t border-b border-slate-800 py-1">{timeLeft <= 0 ? "PRESSURE CRITICAL" : "OVERFLOW DETECTED"}</p>
                </div>
                
                <div className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl relative overflow-hidden">

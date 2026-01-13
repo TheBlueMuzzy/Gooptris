@@ -3,9 +3,11 @@ import React, { useMemo, useCallback, useRef, useState } from 'react';
 import { GameState, Coordinate, FallingBlock, GridCell } from '../types';
 import { VISIBLE_WIDTH, VISIBLE_HEIGHT, COLORS, TOTAL_WIDTH, TOTAL_HEIGHT, BUFFER_HEIGHT, PER_BLOCK_DURATION } from '../constants';
 import { normalizeX, getGhostY } from '../utils/gameLogic';
+import { audio } from '../utils/audio';
 
 interface GameBoardProps {
   state: GameState;
+  maxTime: number; // For pressure calc
   onBlockTap: (x: number, y: number) => void;
   onTapLeft: () => void;
   onTapRight: () => void;
@@ -32,11 +34,20 @@ interface RenderableCell {
 }
 
 export const GameBoard: React.FC<GameBoardProps> = ({ 
-    state, onBlockTap, onTapLeft, onTapRight, onSwipeUp, onSwipeDown, onSwipeLeft, onSwipeRight 
+    state, maxTime, onBlockTap, onTapLeft, onTapRight, onSwipeUp, onSwipeDown, onSwipeLeft, onSwipeRight 
 }) => {
-  const { grid, boardOffset, activePiece, fallingBlocks, floatingTexts } = state;
+  const { grid, boardOffset, activePiece, fallingBlocks, floatingTexts, timeLeft } = state;
   const [highlightedGroupId, setHighlightedGroupId] = useState<string | null>(null);
   const [shakingGroupId, setShakingGroupId] = useState<string | null>(null);
+
+  // --- PRESSURE CALCULATION ---
+  const pressureRatio = useMemo(() => {
+    if (timeLeft <= 0) return 1;
+    return Math.max(0, 1 - (timeLeft / maxTime));
+  }, [timeLeft, maxTime]);
+
+  const pressureHue = Math.max(0, 120 * (1 - pressureRatio)); // 120 (Green) -> 0 (Red)
+  const pressureColor = `hsla(${pressureHue}, 100%, 50%, 0.15)`; // Low opacity
 
   // --- CYLINDRICAL PROJECTION LOGIC ---
   const ANGLE_PER_COL = (2 * Math.PI) / TOTAL_WIDTH; 
@@ -103,8 +114,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           const elapsed = Date.now() - hit.cell.timestamp;
           
           if (elapsed < totalDuration) {
-              // Not ready yet -> Shake
+              // Not ready yet -> Shake & Sound
               setShakingGroupId(hit.cell.groupId);
+              audio.playReject(); 
               // Clear shake after animation duration
               setTimeout(() => setShakingGroupId(prev => prev === hit.cell!.groupId ? null : prev), 300);
           } else {
@@ -412,6 +424,16 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                     </mask>
                 ))}
             </defs>
+
+            {/* 0. Pressure Fluid Background Fill */}
+            <rect 
+                x={vbX} 
+                y={vbH * (1 - pressureRatio)} 
+                width={vbW} 
+                height={vbH * pressureRatio} 
+                fill={pressureColor}
+                className="transition-all duration-300 ease-out" // Slight smooth when jumping, though frame updates are main driver
+            />
 
             {/* 1. Background Grid */}
             {Array.from({length: VISIBLE_HEIGHT}).map((_, yIdx) => {

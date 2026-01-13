@@ -1,17 +1,20 @@
 
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { GameState, GridCell, ActivePiece, PieceDefinition, PieceType, FallingBlock, ScoreBreakdown, GameStats, FloatingText } from './types';
-import { TOTAL_WIDTH, TOTAL_HEIGHT, VISIBLE_WIDTH, VISIBLE_HEIGHT, BASE_FILL_DURATION, PER_BLOCK_DURATION, GAME_COLORS, PIECES, INITIAL_TIME_MS, SCORE_THRESHOLD, TIME_BONUS_MS } from './constants';
+import { 
+    TOTAL_WIDTH, TOTAL_HEIGHT, VISIBLE_WIDTH, VISIBLE_HEIGHT, PER_BLOCK_DURATION, INITIAL_TIME_MS, 
+    PRESSURE_RECOVERY_BASE_MS, PRESSURE_RECOVERY_PER_UNIT_MS, PRESSURE_TIER_THRESHOLD, PRESSURE_TIER_STEP, PRESSURE_TIER_BONUS_MS, UPGRADE_CONFIG
+} from './constants';
 import { 
     spawnPiece, checkCollision, mergePiece, getRotatedCells, normalizeX, findContiguousGroup, 
     updateGroups, getGhostY, updateFallingBlocks, getFloatingBlocks,
-    calculateHeightBonus, calculateOffScreenBonus, calculateMultiplier, calculateAdjacencyBonus, createInitialGrid,
-    getPaletteForRank
+    calculateHeightBonus, calculateOffScreenBonus, calculateMultiplier, calculateAdjacencyBonus, createInitialGrid
 } from './utils/gameLogic';
 import { calculateRankDetails } from './utils/progression';
 import { GameBoard } from './components/GameBoard';
 import { Controls } from './components/Controls';
 import { Play, RotateCcw, Home } from 'lucide-react';
+import { audio } from './utils/audio';
 
 const INITIAL_SPEED = 800; // ms per block
 const MIN_SPEED = 100;
@@ -22,9 +25,10 @@ interface GameProps {
   onExit: () => void;
   onRunComplete: (score: number) => void;
   initialTotalScore: number;
+  powerUps?: Record<string, number>;
 }
 
-const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore }) => {
+const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, powerUps = {} }) => {
   // Add a generation ID to force hard resets of the game loop
   const [gameId, setGameId] = useState(0);
 
@@ -49,6 +53,9 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
   const [timeLeft, setTimeLeft] = useState(INITIAL_TIME_MS);
   const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
   
+  // Calculate Base Stats from PowerUps
+  const maxTimeRef = useRef(INITIAL_TIME_MS);
+
   // Statistics
   const [scoreBreakdown, setScoreBreakdown] = useState<ScoreBreakdown>({ base: 0, height: 0, offscreen: 0, adjacency: 0, speed: 0 });
   const [gameStats, setGameStats] = useState<GameStats>({ startTime: 0, totalBonusTime: 0, maxGroupSize: 0 });
@@ -88,6 +95,10 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
     };
     gameOverRef.current = gameOver;
     isPausedRef.current = isPaused;
+    
+    // Audio: Update pressure
+    const pressure = Math.max(0, 1 - (timeLeft / maxTimeRef.current));
+    audio.setPressure(pressure);
   }, [activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown, floatingTexts, score]);
 
   useEffect(() => {
@@ -102,6 +113,8 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
   // Triggers exactly once when gameOver becomes true
   useEffect(() => {
     if (gameOver) {
+        audio.playGameOver();
+        audio.stopMusic();
         onRunComplete(score);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -117,6 +130,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
     } else if (countdown === null) {
         // When countdown finishes, set start time if it's 0 (first start)
         setGameStats(prev => prev.startTime === 0 ? { ...prev, startTime: Date.now() } : prev);
+        audio.startMusic();
     }
   }, [countdown]);
 
@@ -128,6 +142,18 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
     // Update the baseline score for this run to the latest total score from the parent
     initialTotalScoreRef.current = latestTotalScorePropRef.current;
     
+    // -- APPLY POWER UPS --
+    const timeBonusLevel = powerUps[UPGRADE_CONFIG.TIME_BONUS.id] || 0;
+    const stabilityLevel = powerUps[UPGRADE_CONFIG.STABILITY.id] || 0;
+    
+    // 1. Initial Time
+    const newMaxTime = INITIAL_TIME_MS + (timeBonusLevel * UPGRADE_CONFIG.TIME_BONUS.effectPerLevel);
+    maxTimeRef.current = newMaxTime;
+    
+    // 2. Initial Speed
+    const stabilityMod = stabilityLevel * UPGRADE_CONFIG.STABILITY.effectPerLevel; // e.g. 0.05 = 5%
+    const newInitialSpeed = INITIAL_SPEED * (1 + stabilityMod); 
+
     // Determine start rank for Junk generation
     const startRank = calculateRankDetails(initialTotalScoreRef.current).rank;
     const newGrid = createInitialGrid(startRank);
@@ -151,11 +177,11 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
     setStoredPiece(null);
     setCombo(0);
     setCellsCleared(0);
-    setGameSpeed(INITIAL_SPEED);
+    setGameSpeed(newInitialSpeed);
     setCanSwap(true);
     setFallingBlocks([]);
     setIsSoftDropping(false);
-    setTimeLeft(INITIAL_TIME_MS);
+    setTimeLeft(newMaxTime);
     setFloatingTexts([]);
     lockStartTimeRef.current = null;
     
@@ -170,7 +196,9 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
     piece.y = 1; 
     piece.startSpawnY = 1;
     setActivePiece(piece);
-  }, []); 
+    
+    audio.resume();
+  }, [powerUps]); 
 
   const spawnNewPiece = useCallback((pieceDef?: PieceDefinition, gridOverride?: GridCell[][], offsetOverride?: number) => {
     const currentGrid = gridOverride || stateRef.current.grid;
@@ -199,32 +227,24 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
 
   // Helper to update score, check time bonus, and track stats
   const updateScoreAndStats = useCallback((pointsToAdd: number, breakdown?: Partial<ScoreBreakdown>) => {
-      setScore(prev => {
-          const newScore = prev + pointsToAdd;
-          
-          const prevThresholds = Math.floor(prev / SCORE_THRESHOLD);
-          const newThresholds = Math.floor(newScore / SCORE_THRESHOLD);
-          const diff = newThresholds - prevThresholds;
-          
-          if (diff > 0) {
-              const bonusTime = diff * TIME_BONUS_MS;
-              setTimeLeft(t => t + bonusTime);
-              setGameStats(s => ({ ...s, totalBonusTime: s.totalBonusTime + bonusTime }));
-          }
-          
-          return newScore;
-      });
+      // -- APPLY SCORE POWER UP --
+      const scoreBoostLevel = powerUps[UPGRADE_CONFIG.SCORE_BOOST.id] || 0;
+      const boostMod = 1 + (scoreBoostLevel * UPGRADE_CONFIG.SCORE_BOOST.effectPerLevel);
+      
+      const finalPoints = Math.ceil(pointsToAdd * boostMod);
+
+      setScore(prev => prev + finalPoints);
 
       if (breakdown) {
           setScoreBreakdown(prev => ({
-              base: prev.base + (breakdown.base || 0),
-              height: prev.height + (breakdown.height || 0),
-              offscreen: prev.offscreen + (breakdown.offscreen || 0),
-              adjacency: prev.adjacency + (breakdown.adjacency || 0),
-              speed: prev.speed + (breakdown.speed || 0),
+              base: prev.base + (breakdown.base || 0) * boostMod,
+              height: prev.height + (breakdown.height || 0) * boostMod,
+              offscreen: prev.offscreen + (breakdown.offscreen || 0) * boostMod,
+              adjacency: prev.adjacency + (breakdown.adjacency || 0) * boostMod,
+              speed: prev.speed + (breakdown.speed || 0) * boostMod,
           }));
       }
-  }, []);
+  }, [powerUps]);
 
   const handleBlockTap = useCallback((x: number, y: number) => {
      if (gameOver || isPaused || countdown !== null) return;
@@ -238,20 +258,43 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
      const elapsed = now - (cell.timestamp || 0); 
      
      if (elapsed < totalDuration) {
+         audio.playReject(); // SFX
          return;
      }
 
      const group = findContiguousGroup(grid, x, y);
      
      if (group.length > 0) {
+        audio.playPop(combo); // SFX
         setCellsCleared(prev => prev + 1);
         
         // Update Max Group Size
-        setGameStats(s => ({ ...s, maxGroupSize: Math.max(s.maxGroupSize, group.length) }));
+        const groupSize = group.length;
+        setGameStats(s => ({ ...s, maxGroupSize: Math.max(s.maxGroupSize, groupSize) }));
 
+        // --- CALCULATE PRESSURE REDUCTION (TIME BONUS) ---
+        // Base: +0s
+        const basePressureReduc = PRESSURE_RECOVERY_BASE_MS;
+        // Per Unit: +0.1s
+        const unitPressureReduc = groupSize * PRESSURE_RECOVERY_PER_UNIT_MS;
+        // Tier Bonus
+        // 15-24: Tier 1 (+0.25s)
+        // 25-34: Tier 2 (+0.50s)
+        let tierPressureReduc = 0;
+        if (groupSize >= PRESSURE_TIER_THRESHOLD) {
+            const tier = Math.floor((groupSize - PRESSURE_TIER_THRESHOLD) / PRESSURE_TIER_STEP) + 1;
+            tierPressureReduc = tier * PRESSURE_TIER_BONUS_MS;
+        }
+
+        const totalTimeAdded = basePressureReduc + unitPressureReduc + tierPressureReduc;
+
+        // Apply Time Bonus (Clamp to Max Time)
+        setTimeLeft(current => Math.min(maxTimeRef.current, current + totalTimeAdded));
+        setGameStats(s => ({ ...s, totalBonusTime: s.totalBonusTime + totalTimeAdded }));
+
+        // --- SCORE CALCULATION ---
         let totalScoreForTap = 0;
         let currentComboCount = combo;
-        
         currentComboCount++; 
 
         // Stats accumulator for this tap
@@ -276,7 +319,6 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
              const finalBlockScore = (bScore + hScore + oScore) * multiplier;
              totalScoreForTap += finalBlockScore;
 
-             // Approximate breakdown attribution (scaled by multiplier)
              tapBreakdown.base += (bScore * multiplier);
              tapBreakdown.height += (hScore * multiplier);
              tapBreakdown.offscreen += (oScore * multiplier);
@@ -290,12 +332,13 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
         const textId = Math.random().toString(36).substr(2, 9);
         setFloatingTexts(prev => [
             ...prev, 
-            { id: textId, text: `+${roundedScore}`, x, y, life: 1, color: '#fbbf24' }
+            { id: textId, text: `+${roundedScore}`, x, y, life: 1, color: '#fbbf24' },
+            { id: textId + '_time', text: `-${(totalTimeAdded/1000).toFixed(1)}s`, x: x, y: y - 1, life: 1, color: '#4ade80' } // Green time text
         ]);
         
         // Auto remove after 1s
         setTimeout(() => {
-            setFloatingTexts(prev => prev.filter(ft => ft.id !== textId));
+            setFloatingTexts(prev => prev.filter(ft => !ft.id.startsWith(textId)));
         }, 1000);
 
         // Removal
@@ -330,6 +373,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
     const tempPiece = { ...activePiece, x: newPieceX };
     
     if (!checkCollision(grid, tempPiece, newOffset)) {
+      audio.playMove(); // SFX
       setBoardOffset(newOffset);
       setActivePiece(tempPiece);
       // Lock timer is NOT reset on move to prevent infinite stalling
@@ -350,6 +394,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
     for (const kick of kicks) {
         const kickedPiece = { ...tempPiece, x: normalizeX(tempPiece.x + kick.x), y: tempPiece.y + kick.y };
         if (!checkCollision(grid, kickedPiece, boardOffset)) {
+            audio.playRotate(); // SFX
             setActivePiece(kickedPiece);
             // Lock timer is NOT reset on rotate
             return;
@@ -370,6 +415,8 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
     const distance = Math.floor(y - activePiece.y);
     updateScoreAndStats(distance * 2, { speed: distance * 2 });
 
+    audio.playDrop(); // SFX
+
     setGrid(newGrid);
     // Use fresh state for spawn
     spawnNewPiece(undefined, newGrid, boardOffset);
@@ -379,6 +426,9 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
 
   const swapPiece = useCallback(() => {
       if (gameOver || isPaused || !activePiece || !canSwap || countdown !== null) return;
+      
+      audio.playRotate(); // Reuse rotate sound for swap
+
       const currentDef = activePiece.definition;
       const nextDef = storedPiece;
       
@@ -438,6 +488,8 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
         const { active, landed } = updateFallingBlocks(state.fallingBlocks, state.grid, dt, state.gameSpeed);
         
         if (landed.length > 0) {
+            audio.playDrop(); // Sound on land
+
             const newGrid = state.grid.map(row => [...row]);
             let landUpdates = false;
             
@@ -494,7 +546,8 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
                 }
                 
                 const newGrid = mergePiece(state.grid, finalPiece);
-                
+                audio.playDrop(); // Sound on Lock
+
                 setGrid(newGrid);
                 setCombo(0);
                 
@@ -533,6 +586,9 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
               setIsPaused(prev => {
                   const newVal = !prev;
                   isPausedRef.current = newVal;
+                  // Stop music on pause
+                  if (newVal) audio.stopMusic();
+                  else audio.startMusic();
                   return newVal;
               });
               return;
@@ -602,8 +658,9 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
       <Controls 
         state={gameState} 
         onRestart={startNewGame}
-        onExit={onExit}
+        onExit={() => { audio.stopMusic(); onExit(); }}
         initialTotalScore={initialTotalScoreRef.current}
+        maxTime={maxTimeRef.current}
       />
 
       {countdown !== null && !gameOver && (
@@ -623,7 +680,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
         <div className="absolute inset-0 bg-slate-950/80 z-40 flex flex-col items-center justify-center backdrop-blur-sm gap-6">
             <h2 className="text-4xl text-cyan-400 font-bold tracking-widest animate-pulse mb-4">PAUSED</h2>
             <button 
-              onClick={() => { setIsPaused(false); isPausedRef.current = false; }}
+              onClick={() => { setIsPaused(false); isPausedRef.current = false; audio.resume(); audio.startMusic(); }}
               className="flex items-center gap-3 px-8 py-4 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg shadow-lg shadow-cyan-900/50 transition-all active:scale-95 text-xl"
             >
                <Play className="w-6 h-6 fill-current" /> RESUME
@@ -635,7 +692,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
                <RotateCcw className="w-5 h-5" /> RESTART
             </button>
             <button 
-              onClick={onExit}
+              onClick={() => { audio.stopMusic(); onExit(); }}
               className="flex items-center gap-3 px-8 py-4 bg-red-900/50 hover:bg-red-900/80 text-red-200 font-bold rounded-lg border border-red-800 transition-all active:scale-95 text-lg"
             >
                <Home className="w-5 h-5" /> EXIT
@@ -645,6 +702,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore })
       
       <GameBoard 
         state={gameState} 
+        maxTime={maxTimeRef.current}
         onBlockTap={handleBlockTap} 
         onTapLeft={() => rotatePiece(false)}
         onTapRight={() => rotatePiece(true)}

@@ -20,8 +20,44 @@ export const PER_BLOCK_DURATION = 375;  // Extra time per block in group
 
 // Timer Constants
 export const INITIAL_TIME_MS = 60 * 1000;
-export const SCORE_THRESHOLD = 10000;
-export const TIME_BONUS_MS = 1000;
+
+// Pressure / Time Recovery Constants
+export const PRESSURE_RECOVERY_BASE_MS = 0; // Removed base per pop
+export const PRESSURE_RECOVERY_PER_UNIT_MS = 100; // +0.1s per unit
+export const PRESSURE_TIER_THRESHOLD = 15; // Tier 1 starts at 15
+export const PRESSURE_TIER_STEP = 10; // New tier every 10 blocks
+export const PRESSURE_TIER_BONUS_MS = 250; // +0.25s per tier
+
+// Upgrades Configuration
+export const UPGRADE_CONFIG = {
+  TIME_BONUS: {
+    id: 'TIME_BONUS',
+    name: 'CHRONO-DILATION',
+    desc: 'Extends initial reactor pressure containment duration.',
+    costPerLevel: 1,
+    maxLevel: 10,
+    effectPerLevel: 5000, // +5 seconds
+    formatEffect: (lvl: number) => `+${lvl * 5}s Initial Time`
+  },
+  STABILITY: {
+    id: 'STABILITY',
+    name: 'VISCOSITY REGULATOR',
+    desc: 'Increases intake fluid viscosity to reduce flow rate.',
+    costPerLevel: 1,
+    maxLevel: 10,
+    effectPerLevel: 0.05, // +5% slower (higher ms value)
+    formatEffect: (lvl: number) => `-${lvl * 5}% Fall Speed`
+  },
+  SCORE_BOOST: {
+    id: 'SCORE_BOOST',
+    name: 'CATALYST INJECTOR',
+    desc: 'Enhances filtration yield for higher efficiency rating.',
+    costPerLevel: 2,
+    maxLevel: 10,
+    effectPerLevel: 0.10, // +10% score
+    formatEffect: (lvl: number) => `+${lvl * 10}% Score Yield`
+  }
+};
 
 // The 4 Game Colors
 export const GAME_COLORS = [

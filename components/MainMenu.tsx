@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { Play, Settings, Zap, Trash2, AlertTriangle } from 'lucide-react';
 import { SaveData } from '../types';
 import { calculateRankDetails } from '../utils/progression';
+import { audio } from '../utils/audio';
 
 interface MainMenuProps {
   onPlay: () => void;
@@ -22,6 +23,12 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettin
   // Calculate directly from props every render to avoid stale memoization issues
   const rankInfo = calculateRankDetails(saveData.totalScore);
   const progressPercent = rankInfo.isMaxRank ? 100 : (rankInfo.progress / rankInfo.toNextRank) * 100;
+
+  const handlePlayClick = () => {
+    audio.init(saveData.settings);
+    audio.resume();
+    onPlay();
+  };
 
   const handleWipeClick = () => {
     if (confirmWipe) {
@@ -92,7 +99,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettin
       {/* Buttons */}
       <div className="flex flex-col gap-4 w-full max-w-xs z-10 relative">
         <button 
-          onClick={onPlay}
+          onClick={handlePlayClick}
           className="group relative flex items-center justify-center gap-4 px-8 py-6 bg-green-700 hover:bg-green-600 text-white font-bold rounded-xl shadow-[0_0_30px_rgba(21,128,61,0.4)] hover:shadow-[0_0_50px_rgba(34,197,94,0.6)] transition-all active:scale-95 text-2xl border border-green-500/30 overflow-hidden"
         >
            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-150%] group-hover:translate-x-[150%] transition-transform duration-700 ease-in-out" />
