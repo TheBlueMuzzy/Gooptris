@@ -78,6 +78,8 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
   // --- Input Handling ---
   const touchStart = useRef<{x: number, y: number, time: number} | null>(null);
+  const lastDragXRef = useRef<number>(0);
+  const isDraggingHorizontallyRef = useRef(false);
 
   // Helper to determine what was hit at specific screen coordinates
   const getHitData = (clientX: number, clientY: number, target: Element) => {
@@ -146,12 +148,55 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {
+      const cx = e.touches[0].clientX;
       touchStart.current = {
-          x: e.touches[0].clientX,
+          x: cx,
           y: e.touches[0].clientY,
           time: Date.now()
       };
-      handleInputStart(e.touches[0].clientX, e.touches[0].clientY, e.currentTarget);
+      
+      // Reset drag tracking
+      lastDragXRef.current = cx;
+      isDraggingHorizontallyRef.current = false;
+      
+      handleInputStart(cx, e.touches[0].clientY, e.currentTarget);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+      if (!touchStart.current) return;
+      const cx = e.touches[0].clientX;
+      const cy = e.touches[0].clientY;
+      
+      const dx = cx - touchStart.current.x;
+      const dy = cy - touchStart.current.y;
+      
+      // If haven't decided if this is a drag yet
+      if (!isDraggingHorizontallyRef.current) {
+          // If we moved more than 10px and mostly horizontal
+          if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
+              isDraggingHorizontallyRef.current = true;
+              setHighlightedGroupId(null); // Cancel tap highlight
+              lastDragXRef.current = cx; // Sync drag start to current position
+          }
+      }
+      
+      // Continuous Drag Logic - "Follow Finger"
+      if (isDraggingHorizontallyRef.current) {
+          const stepSize = 40; // Pixels to trigger one step
+          const diff = cx - lastDragXRef.current;
+          
+          if (Math.abs(diff) >= stepSize) {
+              // Drag Right (positive) -> Move Board Right -> Offset -1 -> Swipe Right
+              const isRight = diff > 0;
+              
+              if (isRight) onSwipeRight();
+              else onSwipeLeft();
+              
+              // Advance the reference point by one step to smooth it out
+              // We use one step at a time to prevent "teleporting" and ensure each step is processed
+              lastDragXRef.current += (stepSize * (isRight ? 1 : -1));
+          }
+      }
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
@@ -165,6 +210,13 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       
       touchStart.current = null;
 
+      // If we were effectively dragging the board horizontally, stop here
+      if (isDraggingHorizontallyRef.current) {
+          isDraggingHorizontallyRef.current = false;
+          setHighlightedGroupId(null);
+          return;
+      }
+
       const absDx = Math.abs(dx);
       const absDy = Math.abs(dy);
 
@@ -174,17 +226,17 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           return;
       }
       
-      // If we are here, it's a swipe (or a long press/drag that failed tap criteria)
-      // Ensure highlight is cleared
+      // Swipe Detection (Vertical Only here, since Horizontal is handled in Move)
       setHighlightedGroupId(null);
 
-      // Swipe Detection
-      if (absDx > absDy) {
-          if (dx > 30) onSwipeRight();
-          else if (dx < -30) onSwipeLeft();
-      } else {
-          if (dy > 30) onSwipeDown();
-          else if (dy < -30) onSwipeUp();
+      // We only process vertical swipes here or short horizontal flicks that didn't trigger drag
+      if (absDy > absDx && absDy > 30) {
+          if (dy > 0) onSwipeDown();
+          else onSwipeUp();
+      } else if (absDx > absDy && absDx > 30) {
+          // Fallback for fast flicks that didn't trigger "drag" mode?
+          if (dx > 0) onSwipeRight();
+          else onSwipeLeft();
       }
   };
 
@@ -205,16 +257,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       const dy = Math.abs(e.clientY - touchStart.current.y);
       touchStart.current = null;
 
-      // Mouse "Tap" is very loose on movement, strict on time? 
-      // Actually mouse swipes are rare, usually clicks. 
-      // Let's treat any mouse up with low movement as a tap.
       const isTap = Math.max(dx, dy) < 15;
       
-      // If it wasn't a tap (dragged), we might want swipe logic for mouse too
       if (isTap) {
         handleInputEnd(true, e.clientX, e.clientY, e.currentTarget);
       } else {
-        // Drag logic for mouse swipes could go here if desired
         setHighlightedGroupId(null);
       }
   };
@@ -393,6 +440,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     <div 
         className="w-full h-full bg-slate-950 relative shadow-2xl border-x-4 border-slate-900 overflow-hidden select-none"
         onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
@@ -414,7 +462,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                     <mask key={`mask-${gid}`} id={`mask-${gid}`}>
                         {cells.map((c, i) => (
                              <path 
-                                key={i}
+                                key={c.cell.id + '-' + i}
                                 d={getBlobPath(c.screenX, c.screenY, c.width, BLOCK_SIZE, c.neighbors)}
                                 fill="white"
                                 stroke="white"
@@ -485,7 +533,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                                 if (!c.cell || c.isFalling) {
                                     return (
                                         <rect 
-                                            key={`liq-${i}`}
+                                            key={`liq-${c.cell.id}`}
                                             x={c.screenX - 0.5} 
                                             y={c.screenY}
                                             width={c.width + 1} // Overlap
@@ -508,7 +556,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
                                 return (
                                     <rect 
-                                        key={`liq-${i}`}
+                                        key={`liq-${c.cell.id}`}
                                         x={c.screenX - 0.5} 
                                         y={c.screenY + (BLOCK_SIZE - fillHeight)} 
                                         width={c.width + 1}
@@ -532,7 +580,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                         {/* C. Contours (Glow) */}
                         {cells.map((c, i) => (
                              <path 
-                                key={`cnt-${i}`}
+                                key={`cnt-${c.cell.id}`}
                                 d={getContourPath(c.screenX, c.screenY, c.width, BLOCK_SIZE, c.neighbors)}
                                 fill="none"
                                 stroke={color}
@@ -548,7 +596,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                              if (!hPath) return null;
                              return (
                                  <path 
-                                    key={`hlt-${i}`}
+                                    key={`hlt-${c.cell.id}`}
                                     d={hPath}
                                     fill="none"
                                     stroke="white"
