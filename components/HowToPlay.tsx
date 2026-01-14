@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { ArrowLeft, MousePointer, Gauge, Combine, ArrowUpCircle, Keyboard, Zap } from 'lucide-react';
+import { ArrowLeft, MousePointer, Gauge, Combine, ArrowUpCircle, Keyboard, Zap, Target } from 'lucide-react';
 
 interface HowToPlayProps {
   onBack: () => void;
@@ -39,6 +39,19 @@ export const HowToPlay: React.FC<HowToPlayProps> = ({ onBack }) => {
                   <h3 className="text-xl font-bold text-white tracking-wide">MECHANICS</h3>
               </div>
               
+              <div className="flex gap-4 items-start">
+                  <div className="bg-slate-950 p-2 rounded-lg border border-slate-800 shrink-0 mt-1">
+                    <Target className="w-5 h-5 text-red-500" />
+                  </div>
+                  <div>
+                      <h4 className="font-bold text-slate-200 text-sm">Priority Targets</h4>
+                      <p className="text-slate-400 text-xs mt-1">
+                          Sensors identify impurity hotspots with <span className="text-white font-bold">colored markers</span> on the grid. 
+                          Clear goop of the <span className="text-white font-bold">matching color</span> at these coordinates to execute a localized flush protocol.
+                      </p>
+                  </div>
+              </div>
+
               <div className="flex gap-4 items-start">
                   <div className="bg-slate-950 p-2 rounded-lg border border-slate-800 shrink-0 mt-1">
                     <MousePointer className="w-5 h-5 text-yellow-400" />
