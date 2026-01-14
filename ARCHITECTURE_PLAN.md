@@ -128,19 +128,109 @@ goops/
 
 **Goal:** Fix critical bugs without restructuring.
 
-**Tasks:**
-- [ ] Clarify piece/board coupling behavior (see open question below)
-- [ ] Fix any collision edge cases
-- [ ] Ensure current gameplay is stable baseline
+**Decision Made:** Option B - Piece should move WITH the tank when board rotates.
 
-**Open Question:** When rotating tank, should piece:
-- A) Stay at same screen position (current behavior - piece.x changes to compensate)
-- B) Move with tank visually (piece.x stays constant, appears to rotate with tank)
+**Rationale:** "Set and forget" style - once you drop goop into the tank, it's part of the tank world. When the tank rotates, everything inside (including falling pieces) rotates with it. This aligns with the physical metaphor.
 
-For target drag-drop model, A is correct (piece in screen-space).
-For current auto-fall model, B might feel more natural.
+#### Task 0.1: Fix Piece/Board Coupling
 
-**Decision needed before proceeding.**
+**Current Behavior (Bug):**
+- When tank rotates, `moveBoard()` updates BOTH `boardOffset` AND `activePiece.x`
+- This makes piece stay at same screen column while tank rotates underneath
+- Result: Piece appears to "slide" against tank rotation
+
+**Desired Behavior:**
+- When tank rotates, ONLY `boardOffset` changes
+- `activePiece.x` stays constant (its tank coordinate)
+- Result: Piece visually moves WITH the tank
+
+**File:** `Game.tsx`
+
+**Function:** `moveBoard()` (approximately lines 265-286)
+
+**Current Code:**
+```typescript
+const moveBoard = useCallback((dir: number) => {
+  const { gameOver, isPaused, activePiece, countdown, boardOffset, grid } = stateRef.current;
+  if (gameOver || isPaused || !activePiece || countdown !== null) return;
+
+  const newOffset = normalizeX(boardOffset + dir);
+  const newPieceX = normalizeX(activePiece.x + dir);  // <-- REMOVE
+
+  const tempPiece = { ...activePiece, x: newPieceX }; // <-- REMOVE
+
+  if (!checkCollision(grid, tempPiece, newOffset)) {  // <-- Use activePiece instead
+    audio.playMove();
+    setBoardOffset(newOffset);
+    setActivePiece(tempPiece);  // <-- REMOVE
+
+    // Manual Sync
+    stateRef.current = {
+        ...stateRef.current,
+        boardOffset: newOffset,
+        activePiece: tempPiece  // <-- REMOVE
+    };
+  }
+}, []);
+```
+
+**Fixed Code:**
+```typescript
+const moveBoard = useCallback((dir: number) => {
+  const { gameOver, isPaused, activePiece, countdown, boardOffset, grid } = stateRef.current;
+  if (gameOver || isPaused || !activePiece || countdown !== null) return;
+
+  const newOffset = normalizeX(boardOffset + dir);
+
+  // Piece stays at same tank coordinate - only board offset changes
+  // Check collision with piece at its CURRENT position against the NEW board offset
+  if (!checkCollision(grid, activePiece, newOffset)) {
+    audio.playMove();
+    setBoardOffset(newOffset);
+    // NOTE: activePiece is NOT updated - it stays at same tank coordinate
+
+    // Manual Sync
+    stateRef.current = {
+        ...stateRef.current,
+        boardOffset: newOffset
+        // activePiece unchanged
+    };
+  }
+}, []);
+```
+
+**Key Changes:**
+1. Remove `newPieceX` calculation (line 270)
+2. Remove `tempPiece` creation (line 272)
+3. Use `activePiece` directly in collision check (line 274)
+4. Remove `setActivePiece(tempPiece)` call (line 277)
+5. Remove `activePiece` from stateRef sync (line 283)
+
+**Ghost Piece Verification:**
+- Ghost Y is calculated in `GameBoard.tsx` using `getGhostY(grid, activePiece, boardOffset)`
+- Since `activePiece.x` is now the tank coordinate, ghost should automatically render correctly
+- Ghost will visually move with tank rotation (same as active piece) ✓
+
+**Collision Note:**
+- `checkCollision(grid, piece, boardOffset)` already handles wraparound via `normalizeX`
+- With fixed code, we're checking: "Can piece at its current tank-X exist when board is at new offset?"
+- This is correct - we want to ensure the piece won't clip through anything when view shifts
+
+#### Task 0.2: Test Gameplay
+
+**Manual Test Checklist:**
+- [ ] Rotate tank left (A key) - piece should visually move right with tank
+- [ ] Rotate tank right (D key) - piece should visually move left with tank
+- [ ] Ghost piece moves with tank rotation
+- [ ] Piece can still be moved left/right (relative to screen) with arrow keys
+- [ ] Collision detection still works at board edges
+- [ ] Hard drop still works after tank rotation
+- [ ] Stored piece (W swap) still works correctly
+
+**Edge Cases:**
+- [ ] Rotate tank when piece is at visual edge of screen
+- [ ] Rotate tank multiple times rapidly
+- [ ] Rotate tank + move piece simultaneously
 
 ---
 
@@ -404,7 +494,7 @@ After each phase:
 
 ## Open Questions for User
 
-1. **Phase 0:** Confirm piece/board coupling desired behavior for current prototype
+1. ~~**Phase 0:** Confirm piece/board coupling desired behavior for current prototype~~ **RESOLVED: Option B - piece moves with tank**
 2. **Phase 4:** Should piece auto-grab on spawn, or require explicit grab action?
 3. **Phase 5:** How long should transitions take? (Tunable via upgrades later)
 4. **Phase 7:** First complication to implement?
