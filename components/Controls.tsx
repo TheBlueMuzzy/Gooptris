@@ -196,16 +196,35 @@ export const Controls: React.FC<ControlsProps> = ({
                         {isWin && <div className="text-xs text-green-400 mt-1 font-mono uppercase">+ MISSION BONUS APPLIED</div>}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4 mb-6">
-                         <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-center">
-                            <div className="text-[10px] text-slate-500 uppercase">Goals</div>
-                            <div className="text-lg text-yellow-400 font-mono font-bold">
+                    <div className="grid grid-cols-2 gap-3 mb-6">
+                         {/* Box 1: Goals */}
+                         <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-center flex flex-col justify-center">
+                            <div className="text-[10px] text-slate-500 uppercase tracking-wider">Goals</div>
+                            <div className="text-lg text-yellow-400 font-mono font-bold leading-tight">
                                 {goalsCleared} / {goalsTarget}
                             </div>
                          </div>
-                         <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-center">
-                            <div className="text-[10px] text-slate-500 uppercase">Max Mass</div>
-                            <div className="text-lg text-slate-200 font-mono">{gameStats.maxGroupSize} Units</div>
+                         
+                         {/* Box 2: Pressure Vented */}
+                         <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-center flex flex-col justify-center">
+                            <div className="text-[10px] text-slate-500 uppercase tracking-wider">Pressure Vented</div>
+                            <div className="text-lg text-cyan-400 font-mono font-bold leading-tight">
+                                {(gameStats.totalBonusTime / 1000).toFixed(1)}s
+                            </div>
+                         </div>
+
+                         {/* Box 3: Max Mass */}
+                         <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-center flex flex-col justify-center">
+                            <div className="text-[10px] text-slate-500 uppercase tracking-wider">Max Mass</div>
+                            <div className="text-lg text-slate-200 font-mono font-bold leading-tight">{gameStats.maxGroupSize} Units</div>
+                         </div>
+
+                         {/* Box 4: Leftover Goop Penalty */}
+                         <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-center flex flex-col justify-center">
+                            <div className="text-[10px] text-slate-500 uppercase tracking-wider">Leftover Goop</div>
+                            <div className="text-lg text-red-400 font-mono font-bold leading-tight">
+                                -{gameStats.penalty || 0}
+                            </div>
                          </div>
                     </div>
                </div>

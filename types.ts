@@ -62,6 +62,7 @@ export interface GameStats {
     startTime: number;
     totalBonusTime: number;
     maxGroupSize: number;
+    penalty?: number;
 }
 
 export interface FloatingText {

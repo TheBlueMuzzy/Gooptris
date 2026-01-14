@@ -121,6 +121,9 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
         grid.forEach(row => row.forEach(cell => { if (cell) blockCount++; }));
         const penalty = blockCount * 50;
         
+        // Save penalty to stats for UI
+        setGameStats(prev => ({ ...prev, penalty }));
+
         // Apply penalty, ensuring score doesn't go below 0
         const penalizedScore = Math.max(0, score - penalty);
         setScore(penalizedScore);
