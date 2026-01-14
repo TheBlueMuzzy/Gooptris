@@ -116,9 +116,20 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
         audio.playGameOver();
         audio.stopMusic();
         
+        // Calculate penalty for remaining locked blocks
+        let blockCount = 0;
+        grid.forEach(row => row.forEach(cell => { if (cell) blockCount++; }));
+        const penalty = blockCount * 50;
+        
+        // Apply penalty, ensuring score doesn't go below 0
+        const penalizedScore = Math.max(0, score - penalty);
+        setScore(penalizedScore);
+
         // If Win (Goal Reached), provide bonus
         const isWin = goalsCleared >= goalsTarget;
-        const finalScore = score + (isWin ? 5000 * calculateRankDetails(initialTotalScoreRef.current).rank : 0);
+        const rankBonus = isWin ? 5000 * calculateRankDetails(initialTotalScoreRef.current).rank : 0;
+        
+        const finalScore = penalizedScore + rankBonus;
         
         onRunComplete(finalScore);
     }
