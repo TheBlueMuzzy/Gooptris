@@ -9,7 +9,7 @@ import {
     spawnPiece, checkCollision, mergePiece, getRotatedCells, normalizeX, findContiguousGroup, 
     updateGroups, getGhostY, updateFallingBlocks, getFloatingBlocks,
     calculateHeightBonus, calculateOffScreenBonus, calculateMultiplier, calculateAdjacencyBonus, createInitialGrid,
-    spawnGoalMark, getPaletteForRank
+    spawnGoalMark, spawnGoalBurst, getPaletteForRank
 } from './utils/gameLogic';
 import { calculateRankDetails } from './utils/progression';
 import { GameBoard } from './components/GameBoard';
@@ -75,6 +75,9 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
   
   const initialTotalScoreRef = useRef(initialTotalScore);
   const latestTotalScorePropRef = useRef(initialTotalScore);
+
+  // Memoize rank to pass to GameBoard
+  const currentRank = useMemo(() => calculateRankDetails(initialTotalScore + score).rank, [initialTotalScore, score]);
 
   useEffect(() => {
     latestTotalScorePropRef.current = initialTotalScore;
@@ -297,43 +300,64 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
   }, []);
 
   const hardDrop = useCallback(() => {
-    const { gameOver, isPaused, activePiece, countdown, grid, boardOffset, goalMarks, goalsCleared, goalsTarget } = stateRef.current;
+    const { gameOver, isPaused, activePiece, countdown, grid, boardOffset, goalMarks, goalsCleared, goalsTarget, timeLeft, score } = stateRef.current;
     if (gameOver || isPaused || !activePiece || countdown !== null) return;
 
     const y = getGhostY(grid, activePiece, boardOffset);
     const droppedPiece = { ...activePiece, y };
     
     // Check for goal consumption during merge
-    const { grid: newGrid, consumedGoals } = mergePiece(grid, droppedPiece, goalMarks);
+    const { grid: newGrid, consumedGoals, destroyedGoals } = mergePiece(grid, droppedPiece, goalMarks);
     
-    // Handle Consumed Goals
-    if (consumedGoals.length > 0) {
-        const newGoalMarks = goalMarks.filter(g => !consumedGoals.includes(g.id));
-        setGoalMarks(newGoalMarks);
+    // Handle Goals
+    if (consumedGoals.length > 0 || destroyedGoals.length > 0) {
+        const goalsToRemove = [...consumedGoals, ...destroyedGoals];
+        let newGoalMarks = goalMarks.filter(g => !goalsToRemove.includes(g.id));
         
         const newCleared = goalsCleared + consumedGoals.length;
+        const currentRank = calculateRankDetails(initialTotalScoreRef.current + score).rank;
+
+        // If target reached for the FIRST time
+        if (newCleared >= goalsTarget && goalsCleared < goalsTarget) {
+             const pressureRatio = Math.max(0, 1 - (timeLeft / maxTimeRef.current));
+             if (pressureRatio < 0.9) {
+                 const burst = spawnGoalBurst(newGrid, newGoalMarks, currentRank, timeLeft, maxTimeRef.current);
+                 newGoalMarks = [...newGoalMarks, ...burst];
+                 audio.playPop(10); 
+             } else {
+                 newGoalMarks = [];
+             }
+        } else if (newCleared >= goalsTarget) {
+            // Already met target previously, keep the burst markers but do nothing new
+            // Unless we want to clear them? 
+            // Stick to "stop spawning" logic which is implicit.
+            // If pressure spikes > 90%, maybe clear? 
+            const pressureRatio = Math.max(0, 1 - (timeLeft / maxTimeRef.current));
+            if (pressureRatio >= 0.9) {
+                newGoalMarks = [];
+            }
+        }
+
+        setGoalMarks(newGoalMarks);
         setGoalsCleared(newCleared);
         stateRef.current.goalsCleared = newCleared;
         stateRef.current.goalMarks = newGoalMarks;
 
-        // Visual Feedback
+        // Visual Feedback for Consumed
         consumedGoals.forEach(id => {
-            // Find rough location for floating text (using piece center)
             const cx = normalizeX(droppedPiece.x); 
             const cy = Math.floor(droppedPiece.y);
             const textId = Math.random().toString(36).substr(2, 9);
             setFloatingTexts(prev => [...prev, {
                 id: textId, text: 'GOAL!', x: cx, y: cy, life: 1, color: '#facc15'
             }]);
-            audio.playPop(5); // High pitch pop
+            audio.playPop(5); 
         });
-
-        // Check Win
-        if (newCleared >= goalsTarget) {
-            setGameOver(true);
-            gameOverRef.current = true;
-            return;
-        }
+        
+        // Visual Feedback for Destroyed (Optional, maybe a break sound?)
+        destroyedGoals.forEach(id => {
+            audio.playReject();
+        });
     }
 
     const distance = Math.floor(y - activePiece.y);
@@ -429,15 +453,10 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
      const cell = grid[y][x];
      if (!cell) return;
      
-     // PRESSURE LOGIC:
-     // Allow popping if the group reaches down into the "high pressure" zone.
-     // Base zone is the bottom row (18). 
-     // As pressure increases (timeLeft decreases), the threshold moves UP.
+     // PRESSURE LOGIC
      const pressureRatio = Math.max(0, 1 - (timeLeft / maxTimeRef.current));
      const thresholdY = (TOTAL_HEIGHT - 1) - (pressureRatio * (VISIBLE_HEIGHT - 1));
      
-     // Check if the group's HIGHEST point (smallest Y) is below (greater than) the threshold line
-     // This ensures the entire group (or at least its top block) is submerged.
      if (cell.groupMinY < thresholdY) {
          audio.playReject();
          return;
@@ -470,7 +489,14 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
             tierPressureReduc = tier * PRESSURE_TIER_BONUS_MS;
         }
 
-        const totalTimeAdded = basePressureReduc + unitPressureReduc + tierPressureReduc;
+        // Infused Cell Bonus
+        let infusedCount = 0;
+        group.forEach(pt => {
+            if (grid[pt.y][pt.x]?.isGlowing) infusedCount++;
+        });
+        const infusedBonus = infusedCount * 3000; // 3 seconds per infused cell
+
+        const totalTimeAdded = basePressureReduc + unitPressureReduc + tierPressureReduc + infusedBonus;
 
         setTimeLeft(current => Math.min(maxTimeRef.current, current + totalTimeAdded));
         setGameStats(s => ({ ...s, totalBonusTime: s.totalBonusTime + totalTimeAdded }));
@@ -502,11 +528,16 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
         setCombo(currentComboCount);
 
         const textId = Math.random().toString(36).substr(2, 9);
-        setFloatingTexts(prev => [
-            ...prev, 
+        const floaters = [
             { id: textId, text: `+${roundedScore}`, x, y, life: 1, color: '#fbbf24' },
             { id: textId + '_time', text: `-${(totalTimeAdded/1000).toFixed(1)}s`, x: x, y: y - 1, life: 1, color: '#4ade80' }
-        ]);
+        ];
+        
+        if (infusedBonus > 0) {
+             floaters.push({ id: textId + '_bonus', text: 'INFUSED!', x: x, y: y - 2, life: 1, color: '#fff' });
+        }
+
+        setFloatingTexts(prev => [...prev, ...floaters]);
         
         setTimeout(() => {
             setFloatingTexts(prev => prev.filter(ft => !ft.id.startsWith(textId)));
@@ -564,23 +595,27 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
     const freshState = stateRef.current;
 
     // 0.5 Goal Mark Spawning
-    if (now - lastGoalSpawnTimeRef.current > GOAL_SPAWN_INTERVAL) {
-        const currentRank = calculateRankDetails(initialTotalScoreRef.current + freshState.score).rank;
-        const newGoal = spawnGoalMark(
-            freshState.grid, 
-            freshState.goalMarks, 
-            currentRank, 
-            freshState.timeLeft, 
-            maxTimeRef.current
-        );
+    // Stop spawning if goal is met
+    if (freshState.goalsCleared < freshState.goalsTarget) {
+        if (now - lastGoalSpawnTimeRef.current > GOAL_SPAWN_INTERVAL) {
+            const currentRank = calculateRankDetails(initialTotalScoreRef.current + freshState.score).rank;
+            
+            const newGoal = spawnGoalMark(
+                freshState.grid, 
+                freshState.goalMarks,
+                currentRank, 
+                freshState.timeLeft, 
+                maxTimeRef.current
+            );
 
-        if (newGoal) {
-            const updatedMarks = [...freshState.goalMarks, newGoal];
-            setGoalMarks(updatedMarks);
-            stateRef.current.goalMarks = updatedMarks;
-            audio.playPop(1); // Small blip
+            if (newGoal) {
+                const updatedMarks = [...freshState.goalMarks, newGoal];
+                setGoalMarks(updatedMarks);
+                stateRef.current.goalMarks = updatedMarks;
+                audio.playPop(1); // Small blip
+            }
+            lastGoalSpawnTimeRef.current = now;
         }
-        lastGoalSpawnTimeRef.current = now;
     }
 
     // 1. Update Timer
@@ -642,14 +677,34 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
                 const finalPiece = { ...freshState.activePiece, y };
                 
                 // Check Goals Consumption during merge
-                const { grid: newGrid, consumedGoals } = mergePiece(freshState.grid, finalPiece, freshState.goalMarks);
+                const { grid: newGrid, consumedGoals, destroyedGoals } = mergePiece(freshState.grid, finalPiece, freshState.goalMarks);
                 
-                // Handle Consumed Goals
-                if (consumedGoals.length > 0) {
-                    const newGoalMarks = freshState.goalMarks.filter(g => !consumedGoals.includes(g.id));
-                    setGoalMarks(newGoalMarks);
+                // Handle Goals
+                if (consumedGoals.length > 0 || destroyedGoals.length > 0) {
+                    const goalsToRemove = [...consumedGoals, ...destroyedGoals];
+                    let newGoalMarks = freshState.goalMarks.filter(g => !goalsToRemove.includes(g.id));
                     
                     const newCleared = freshState.goalsCleared + consumedGoals.length;
+                    const currentRank = calculateRankDetails(initialTotalScoreRef.current + freshState.score).rank;
+
+                    // Burst Logic
+                    if (newCleared >= freshState.goalsTarget && freshState.goalsCleared < freshState.goalsTarget) {
+                        const pressureRatio = Math.max(0, 1 - (freshState.timeLeft / maxTimeRef.current));
+                        if (pressureRatio < 0.9) {
+                            const burst = spawnGoalBurst(newGrid, newGoalMarks, currentRank, freshState.timeLeft, maxTimeRef.current);
+                            newGoalMarks = [...newGoalMarks, ...burst];
+                            audio.playPop(10);
+                        } else {
+                            newGoalMarks = [];
+                        }
+                    } else if (newCleared >= freshState.goalsTarget) {
+                        const pressureRatio = Math.max(0, 1 - (freshState.timeLeft / maxTimeRef.current));
+                        if (pressureRatio >= 0.9) {
+                            newGoalMarks = [];
+                        }
+                    }
+
+                    setGoalMarks(newGoalMarks);
                     setGoalsCleared(newCleared);
                     stateRef.current.goalsCleared = newCleared;
                     stateRef.current.goalMarks = newGoalMarks;
@@ -665,13 +720,9 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
                         audio.playPop(5); 
                     });
 
-                     // Check Win
-                    if (newCleared >= freshState.goalsTarget) {
-                        setGameOver(true);
-                        gameOverRef.current = true;
-                        // Don't return, let it render one frame so visuals update? 
-                        // Actually return to stop loop is fine
-                    }
+                    destroyedGoals.forEach(id => {
+                        audio.playReject();
+                    });
                 }
 
                 audio.playDrop(); 
@@ -833,6 +884,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
       
       <GameBoard 
         state={gameState} 
+        rank={currentRank}
         maxTime={maxTimeRef.current}
         onBlockTap={handleBlockTap} 
         onTapLeft={() => rotatePiece(false)}

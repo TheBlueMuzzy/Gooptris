@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Play, Settings, Zap, Trash2, AlertTriangle } from 'lucide-react';
+import { Play, Settings, Zap, Trash2, AlertTriangle, HelpCircle } from 'lucide-react';
 import { SaveData } from '../types';
 import { calculateRankDetails } from '../utils/progression';
 import { audio } from '../utils/audio';
@@ -9,16 +9,16 @@ interface MainMenuProps {
   onPlay: () => void;
   onUpgrades: () => void;
   onSettings: () => void;
+  onHowToPlay: () => void;
   saveData: SaveData;
   onWipeSave: () => void;
 }
 
-export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettings, saveData, onWipeSave }) => {
+export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettings, onHowToPlay, saveData, onWipeSave }) => {
   const [confirmWipe, setConfirmWipe] = useState(false);
   
   // Local state for button labels to handle "Coming Soon" flash
   const [systemsLabel, setSystemsLabel] = useState("SYSTEMS");
-  const [configLabel, setConfigLabel] = useState("CONFIG");
   
   // Calculate directly from props every render to avoid stale memoization issues
   const rankInfo = calculateRankDetails(saveData.totalScore);
@@ -46,14 +46,24 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettin
       setTimeout(() => setSystemsLabel("SYSTEMS"), 2000);
   };
 
-  const handleConfigClick = () => {
-      setConfigLabel("COMING SOON");
-      setTimeout(() => setConfigLabel("CONFIG"), 2000);
-  };
-
   return (
     <div className="w-full h-full flex flex-col items-center justify-center p-6 gap-8 animate-in fade-in duration-500 overflow-hidden bg-slate-950 relative">
       <div className="absolute inset-0 z-0 opacity-20 bg-[radial-gradient(circle_at_50%_50%,#059669_0%,transparent_50%)]" />
+
+      {/* Dev Tools - Top */}
+      <div className="absolute top-6 w-full flex justify-center z-50 pointer-events-auto opacity-50 hover:opacity-100 transition-opacity">
+          <button 
+            onClick={handleWipeClick}
+            className={`relative z-50 text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 px-3 py-1 rounded border transition-all cursor-pointer active:scale-95 duration-200 ${
+              confirmWipe 
+                ? 'bg-red-900/80 border-red-500 text-white shadow-[0_0_15px_rgba(220,38,38,0.5)]' 
+                : 'text-red-500/50 hover:text-red-500 border-transparent hover:border-red-900/50'
+            }`}
+          >
+             {confirmWipe ? <AlertTriangle className="w-3 h-3 animate-pulse" /> : <Trash2 className="w-3 h-3" />}
+             {confirmWipe ? "CONFIRM WIPE?" : "WIPE SAVE DATA (TESTING)"}
+          </button>
+      </div>
       
       {/* Title Section */}
       <div className="flex flex-col items-center gap-2 w-full z-10">
@@ -108,6 +118,14 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettin
         </button>
 
         <button 
+          onClick={onHowToPlay}
+          className="flex items-center justify-center gap-3 px-8 py-4 bg-slate-900/50 text-slate-500 font-bold rounded-xl border border-slate-800 transition-all active:scale-95 text-lg cursor-pointer hover:bg-slate-900"
+        >
+           <HelpCircle className="w-5 h-5 text-slate-400" /> 
+           <span>HOW TO PLAY</span>
+        </button>
+
+        <button 
           onClick={handleSystemsClick}
           className="flex items-center justify-center gap-3 px-8 py-4 bg-slate-900/50 text-slate-500 font-bold rounded-xl border border-slate-800 transition-all active:scale-95 text-lg cursor-pointer hover:bg-slate-900"
         >
@@ -116,28 +134,16 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettin
         </button>
 
         <button 
-          onClick={handleConfigClick}
+          onClick={onSettings}
           className="flex items-center justify-center gap-3 px-8 py-4 bg-slate-900/50 text-slate-500 font-bold rounded-xl border border-slate-800 transition-all active:scale-95 text-lg cursor-pointer hover:bg-slate-900"
         >
-           <Settings className={`w-5 h-5 ${configLabel === 'CONFIG' ? 'text-slate-600' : 'text-cyan-500'}`} /> 
-           <span>{configLabel}</span>
+           <Settings className="w-5 h-5 text-cyan-500" /> 
+           <span>CONFIG</span>
         </button>
       </div>
 
-      {/* Footer / Dev Tools */}
+      {/* Footer Info */}
       <div className="absolute bottom-6 w-full flex flex-col items-center gap-4 z-50 pointer-events-auto">
-          <button 
-            onClick={handleWipeClick}
-            className={`relative z-50 text-xs font-mono uppercase tracking-widest flex items-center gap-2 px-3 py-1 rounded border transition-all cursor-pointer active:scale-95 duration-200 ${
-              confirmWipe 
-                ? 'bg-red-900/80 border-red-500 text-white shadow-[0_0_15px_rgba(220,38,38,0.5)]' 
-                : 'text-red-900/50 hover:text-red-500 border-transparent hover:border-red-900/50'
-            }`}
-          >
-             {confirmWipe ? <AlertTriangle className="w-3 h-3 animate-pulse" /> : <Trash2 className="w-3 h-3" />}
-             {confirmWipe ? "CONFIRM WIPE?" : "WIPE SAVE DATA (TESTING)"}
-          </button>
-          
           <div className="flex flex-col items-center gap-1 opacity-60">
             <div className="text-slate-600 text-xs font-mono">v1.1 &bull; REACTOR STABLE</div>
             <div className="text-slate-500 text-[10px] font-mono tracking-widest">

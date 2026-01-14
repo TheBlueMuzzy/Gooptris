@@ -12,7 +12,7 @@ class AudioSystem {
   private droneLfo: OscillatorNode | null = null;
   
   private settings: SaveData['settings'] = {
-    masterVolume: 100,
+    masterVolume: 50,
     musicVolume: 80,
     sfxVolume: 100
   };
@@ -24,7 +24,11 @@ class AudioSystem {
   }
 
   public init(settings: SaveData['settings']) {
-    if (this.isInitialized) return;
+    if (this.isInitialized) {
+        // If already initialized, just ensure settings are up to date
+        this.updateSettings(settings);
+        return;
+    }
     this.settings = settings;
 
     try {
@@ -58,7 +62,9 @@ class AudioSystem {
     if (!this.masterGain || !this.musicGain || !this.sfxGain || !this.ctx) return;
     
     const now = this.ctx.currentTime;
-    const mVol = this.settings.masterVolume / 100;
+    
+    // Safety scaling: 100% UI volume = 0.5 WebAudio gain to prevent ear-blasting
+    const mVol = (this.settings.masterVolume / 100) * 0.5;
     const musicVol = this.settings.musicVolume / 100;
     const sfxVol = this.settings.sfxVolume / 100;
 
@@ -76,7 +82,7 @@ class AudioSystem {
   // --- BGM ---
 
   public startMusic() {
-    // Background audio disabled by design preference
+    // Background audio disabled by design preference for now
     this.stopMusic();
   }
 

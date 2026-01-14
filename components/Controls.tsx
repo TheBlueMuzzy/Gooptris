@@ -1,7 +1,7 @@
 
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { GameState } from '../types';
-import { RefreshCw, Skull, Home, Zap, Activity } from 'lucide-react';
+import { RefreshCw, Skull, Home, Zap, Activity, CheckCircle2 } from 'lucide-react';
 import { calculateRankDetails } from '../utils/progression';
 
 interface ControlsProps {
@@ -15,7 +15,7 @@ interface ControlsProps {
 export const Controls: React.FC<ControlsProps> = ({ 
   state, onRestart, onExit, initialTotalScore, maxTime 
 }) => {
-  const { score, gameOver, combo, timeLeft, scoreBreakdown, gameStats } = state;
+  const { score, gameOver, combo, timeLeft, scoreBreakdown, gameStats, goalsCleared, goalsTarget } = state;
   
   // Timer Formatting (Pressure)
   // Low time means High Pressure
@@ -36,13 +36,19 @@ export const Controls: React.FC<ControlsProps> = ({
   const currentVisualRankInfo = useMemo(() => calculateRankDetails(visualScore), [visualScore]);
   
   const prevRankRef = useRef(startRankInfo.rank);
+  const isWin = goalsCleared >= goalsTarget;
 
   // Animation Loop for Score
   useEffect(() => {
     if (gameOver) {
         let animationFrameId: number;
+        
+        // Calculate the actual end score including the Win Bonus
+        const rankBonus = isWin ? 5000 * startRankInfo.rank : 0;
+        const totalRunScore = score + rankBonus;
+
         const start = initialTotalScore;
-        const end = initialTotalScore + score;
+        const end = initialTotalScore + totalRunScore;
         const duration = 2500; // 2.5 seconds to count up
         const startTime = performance.now();
 
@@ -67,7 +73,7 @@ export const Controls: React.FC<ControlsProps> = ({
         setAccumulatedPowerPts(0);
         prevRankRef.current = calculateRankDetails(initialTotalScore).rank;
     }
-  }, [gameOver, initialTotalScore, score]);
+  }, [gameOver, initialTotalScore, score, isWin, startRankInfo.rank]);
 
   // Detect Level Up during animation
   useEffect(() => {
@@ -94,7 +100,7 @@ export const Controls: React.FC<ControlsProps> = ({
           <div className="absolute inset-0 z-30 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_40%,rgba(100,0,0,0.4)_100%)] animate-pulse" />
       )}
 
-      {/* HUD Layer - Minimalist / No Bar */}
+      {/* HUD Layer */}
       <div className="absolute top-0 left-0 right-0 p-4 pointer-events-none z-50 flex justify-between items-start">
           
           {/* LEFT: Pressure */}
@@ -106,14 +112,14 @@ export const Controls: React.FC<ControlsProps> = ({
               </div>
           </div>
 
-          {/* CENTER: Combo */}
-          {combo > 1 && (
-              <div className="absolute left-1/2 -translate-x-1/2 top-14 md:top-8">
+          {/* CENTER: Combo Only (Goals moved to GameBoard) */}
+          <div className="absolute left-1/2 -translate-x-1/2 top-16 flex flex-col items-center">
+              {combo > 1 && (
                   <div className="text-2xl text-yellow-400 animate-bounce font-black tracking-wider whitespace-nowrap drop-shadow-[0_4px_4px_rgba(0,0,0,0.9)] stroke-black">
                       x{combo} SURGE
                   </div>
-              </div>
-          )}
+              )}
+          </div>
 
           {/* RIGHT: Score */}
           <div className="flex flex-col items-end drop-shadow-[0_2px_3px_rgba(0,0,0,0.9)]">
@@ -127,13 +133,22 @@ export const Controls: React.FC<ControlsProps> = ({
         <div className="absolute inset-0 bg-black/90 z-[60] flex flex-col items-center justify-center p-6 backdrop-blur-md animate-in fade-in duration-300 overflow-y-auto pointer-events-auto">
            <div className="flex flex-col items-center w-full max-w-sm gap-6 my-auto">
                <div className="text-center">
-                   <Skull className="w-16 h-16 text-red-600 mx-auto mb-4 animate-bounce" />
-                   <h1 className="text-4xl font-black text-white tracking-tighter mb-1 font-mono uppercase text-red-500">SYSTEM FAILURE</h1>
-                   <p className="text-slate-500 font-mono text-sm tracking-widest border-t border-b border-slate-800 py-1">{timeLeft <= 0 ? "PRESSURE CRITICAL" : "OVERFLOW DETECTED"}</p>
+                   {isWin ? (
+                       <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto mb-4 animate-bounce" />
+                   ) : (
+                       <Skull className="w-16 h-16 text-red-600 mx-auto mb-4 animate-bounce" />
+                   )}
+                   
+                   <h1 className={`text-4xl font-black tracking-tighter mb-1 font-mono uppercase ${isWin ? 'text-green-500' : 'text-red-500'}`}>
+                       {isWin ? "MISSION COMPLETE" : "SYSTEM FAILURE"}
+                   </h1>
+                   <p className="text-slate-500 font-mono text-sm tracking-widest border-t border-b border-slate-800 py-1">
+                       {isWin ? "ALL TARGETS ELIMINATED" : (timeLeft <= 0 ? "PRESSURE CRITICAL" : "OVERFLOW DETECTED")}
+                   </p>
                </div>
                
                <div className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl relative overflow-hidden">
-                    <div className="absolute top-0 left-0 w-full h-1 bg-red-600" />
+                    <div className={`absolute top-0 left-0 w-full h-1 ${isWin ? 'bg-green-500' : 'bg-red-600'}`} />
                     
                     {/* --- Rank Progress Section --- */}
                     <div className={`rounded-lg p-3 mb-6 border transition-all duration-300 ${levelUpTrigger ? 'bg-yellow-900/20 border-yellow-500 scale-105' : 'bg-slate-950/50 border-slate-800'}`}>
@@ -178,35 +193,20 @@ export const Controls: React.FC<ControlsProps> = ({
                     <div className="text-center mb-6">
                         <div className="text-xs text-slate-500 uppercase tracking-widest mb-1">Final Score</div>
                         <div className="text-4xl font-mono text-white font-bold">{score.toLocaleString()}</div>
+                        {isWin && <div className="text-xs text-green-400 mt-1 font-mono uppercase">+ MISSION BONUS APPLIED</div>}
                     </div>
 
                     <div className="grid grid-cols-2 gap-4 mb-6">
                          <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-center">
-                            <div className="text-[10px] text-slate-500 uppercase">Run Time</div>
-                            <div className="text-lg text-slate-200 font-mono">
-                                {finalTimeSeconds}s 
-                                <span className="text-xs text-green-600 ml-1">(+{bonusTimeSeconds}s)</span>
+                            <div className="text-[10px] text-slate-500 uppercase">Goals</div>
+                            <div className="text-lg text-yellow-400 font-mono font-bold">
+                                {goalsCleared} / {goalsTarget}
                             </div>
                          </div>
                          <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-center">
                             <div className="text-[10px] text-slate-500 uppercase">Max Mass</div>
                             <div className="text-lg text-slate-200 font-mono">{gameStats.maxGroupSize} Units</div>
                          </div>
-                    </div>
-
-                    <div className="space-y-2 text-xs font-mono border-t border-slate-800 pt-4">
-                        <div className="flex justify-between text-slate-400">
-                            <span>Mass Purged</span>
-                            <span className="text-slate-200">{Math.floor(scoreBreakdown.base / 10).toLocaleString()}</span>
-                        </div>
-                        <div className="flex justify-between text-slate-400">
-                            <span>Elevation Bonus</span>
-                            <span className="text-slate-200">{Math.floor(scoreBreakdown.height).toLocaleString()}</span>
-                        </div>
-                        <div className="flex justify-between text-slate-400">
-                            <span>Combo Multiplier</span>
-                            <span className="text-slate-200">{(1 + combo * 0.1).toFixed(1)}x</span>
-                        </div>
                     </div>
                </div>
 

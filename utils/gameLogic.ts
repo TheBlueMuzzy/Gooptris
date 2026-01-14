@@ -1,6 +1,6 @@
 
-import { ActivePiece, Coordinate, GridCell, PieceDefinition, PieceType, BlockData, FallingBlock } from '../types';
-import { TOTAL_WIDTH, TOTAL_HEIGHT, PIECES, GAME_COLORS, VISIBLE_WIDTH, BUFFER_HEIGHT, COLORS } from '../constants';
+import { ActivePiece, Coordinate, GridCell, PieceDefinition, PieceType, BlockData, FallingBlock, GoalMark } from '../types';
+import { TOTAL_WIDTH, TOTAL_HEIGHT, PIECES, GAME_COLORS, VISIBLE_WIDTH, BUFFER_HEIGHT, COLORS, VISIBLE_HEIGHT } from '../constants';
 
 export const normalizeX = (x: number): number => {
   return ((x % TOTAL_WIDTH) + TOTAL_WIDTH) % TOTAL_WIDTH;
@@ -252,17 +252,24 @@ export const updateGroups = (grid: GridCell[][]): GridCell[][] => {
     return newGrid;
 };
 
-export const mergePiece = (grid: GridCell[][], piece: ActivePiece): GridCell[][] => {
+// Returns updated grid AND any consumed goal marks AND destroyed goal marks (wrong color)
+export const mergePiece = (
+    grid: GridCell[][], 
+    piece: ActivePiece, 
+    goalMarks: GoalMark[]
+): { grid: GridCell[][], consumedGoals: string[], destroyedGoals: string[] } => {
+  
   const newGrid = grid.map(row => [...row]);
   const groupId = Math.random().toString(36).substr(2, 9);
   const now = Date.now();
   
   let minY = TOTAL_HEIGHT;
   let maxY = -1;
+  const consumedGoals: string[] = [];
+  const destroyedGoals: string[] = [];
   
+  // Calculate bounds first
   piece.cells.forEach(cell => {
-      // NOTE: We assume piece.y is already integer here (from ghost drop or lock)
-      // We force floor here to be safe against float drift.
       const y = Math.floor(piece.y + cell.y);
       if (y < minY) minY = y;
       if (y > maxY) maxY = y;
@@ -275,6 +282,19 @@ export const mergePiece = (grid: GridCell[][], piece: ActivePiece): GridCell[][]
     const y = Math.floor(piece.y + cell.y);
     
     if (y >= 0 && y < TOTAL_HEIGHT) {
+      // Check for Goal Interaction
+      const hitGoal = goalMarks.find(g => g.x === x && g.y === y);
+      
+      let isMatch = false;
+      if (hitGoal) {
+          if (hitGoal.color === piece.definition.color) {
+              consumedGoals.push(hitGoal.id);
+              isMatch = true;
+          } else {
+              destroyedGoals.push(hitGoal.id);
+          }
+      }
+
       newGrid[y][x] = {
         id: Math.random().toString(36).substr(2, 9),
         groupId,
@@ -282,12 +302,13 @@ export const mergePiece = (grid: GridCell[][], piece: ActivePiece): GridCell[][]
         color: piece.definition.color,
         groupMinY: minY,
         groupMaxY: maxY,
-        groupSize
+        groupSize,
+        isGlowing: isMatch
       };
     }
   });
   
-  return updateGroups(newGrid);
+  return { grid: updateGroups(newGrid), consumedGoals, destroyedGoals };
 };
 
 export const getFloatingBlocks = (grid: GridCell[][], columnsToCheck?: number[]): { grid: GridCell[][], falling: FallingBlock[] } => {
@@ -447,4 +468,100 @@ export const calculateAdjacencyBonus = (grid: GridCell[][], group: Coordinate[])
     });
     
     return neighborsCount * 5;
+};
+
+// --- Goal Mark Logic ---
+
+export const spawnGoalMark = (
+    grid: GridCell[][], 
+    existingMarks: GoalMark[], 
+    rank: number, 
+    timeLeft: number, 
+    maxTime: number
+): GoalMark | null => {
+    const palette = getPaletteForRank(rank);
+    
+    // Filter colors that already have a goal mark (Active colors are unavailable)
+    const activeColors = new Set(existingMarks.map(m => m.color));
+    const availableColors = palette.filter(c => !activeColors.has(c));
+    
+    if (availableColors.length === 0) return null;
+    
+    const color = availableColors[Math.floor(Math.random() * availableColors.length)];
+    
+    // Calculate Pressure Line Y index
+    const pressureRatio = Math.max(0, 1 - (timeLeft / maxTime));
+    const waterHeightBlocks = 1 + (pressureRatio * (VISIBLE_HEIGHT - 1));
+    const pressureLineY = Math.floor(TOTAL_HEIGHT - waterHeightBlocks);
+    
+    // Valid Y range: [pressureLineY, TOTAL_HEIGHT - 1]
+    const spawnY = Math.max(BUFFER_HEIGHT, Math.min(TOTAL_HEIGHT - 1, pressureLineY));
+    
+    // Try finding a valid empty spot (up to 20 attempts) at this specific Y
+    for (let i = 0; i < 20; i++) {
+        const x = Math.floor(Math.random() * TOTAL_WIDTH);
+        const y = spawnY;
+        
+        // Ensure empty grid cell
+        if (!grid[y][x] && !existingMarks.some(m => m.x === x && m.y === y)) {
+            return {
+                id: Math.random().toString(36).substr(2, 9),
+                x,
+                y,
+                color,
+                spawnTime: Date.now()
+            };
+        }
+    }
+
+    return null;
+};
+
+export const spawnGoalBurst = (
+    grid: GridCell[][],
+    existingMarks: GoalMark[],
+    rank: number,
+    timeLeft: number,
+    maxTime: number
+): GoalMark[] => {
+    const palette = getPaletteForRank(rank);
+    const newMarks: GoalMark[] = [];
+    const currentMarks = [...existingMarks];
+
+    // Calculate Pressure Line Y
+    const pressureRatio = Math.max(0, 1 - (timeLeft / maxTime));
+    const waterHeightBlocks = 1 + (pressureRatio * (VISIBLE_HEIGHT - 1));
+    const pressureLineY = Math.floor(TOTAL_HEIGHT - waterHeightBlocks);
+    
+    // Spawn area: Above pressure line (y < pressureLineY), but within buffer/visible
+    let minSpawnY = BUFFER_HEIGHT;
+    let maxSpawnY = Math.max(BUFFER_HEIGHT, pressureLineY - 1);
+
+    for (const color of palette) {
+        // Try to find a spot for this color
+        // 20 attempts per color
+        for (let i = 0; i < 20; i++) {
+            const x = Math.floor(Math.random() * TOTAL_WIDTH);
+            const y = Math.floor(minSpawnY + Math.random() * (maxSpawnY - minSpawnY + 1));
+            
+            if (y < BUFFER_HEIGHT || y >= TOTAL_HEIGHT) continue;
+
+            const hasBlock = grid[y][x] !== null;
+            const hasMark = currentMarks.some(m => m.x === x && m.y === y);
+            const inNewMarks = newMarks.some(m => m.x === x && m.y === y);
+
+            if (!hasBlock && !hasMark && !inNewMarks) {
+                const mark = {
+                    id: Math.random().toString(36).substr(2, 9),
+                    x,
+                    y,
+                    color,
+                    spawnTime: Date.now()
+                };
+                newMarks.push(mark);
+                break;
+            }
+        }
+    }
+    return newMarks;
 };

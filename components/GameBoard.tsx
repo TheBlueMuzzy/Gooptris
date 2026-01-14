@@ -1,12 +1,13 @@
 
-import React, { useMemo, useCallback, useRef, useState } from 'react';
+import React, { useMemo, useCallback, useRef, useState, useEffect } from 'react';
 import { GameState, Coordinate, FallingBlock, GridCell } from '../types';
 import { VISIBLE_WIDTH, VISIBLE_HEIGHT, COLORS, TOTAL_WIDTH, TOTAL_HEIGHT, BUFFER_HEIGHT, PER_BLOCK_DURATION } from '../constants';
-import { normalizeX, getGhostY } from '../utils/gameLogic';
+import { normalizeX, getGhostY, getPaletteForRank } from '../utils/gameLogic';
 import { audio } from '../utils/audio';
 
 interface GameBoardProps {
   state: GameState;
+  rank: number;
   maxTime: number; // For pressure calc
   onBlockTap: (x: number, y: number) => void;
   onTapLeft: () => void;
@@ -34,11 +35,13 @@ interface RenderableCell {
 }
 
 export const GameBoard: React.FC<GameBoardProps> = ({ 
-    state, maxTime, onBlockTap, onTapLeft, onTapRight, onSwipeUp, onSwipeDown, onSwipeLeft, onSwipeRight 
+    state, rank, maxTime, onBlockTap, onTapLeft, onTapRight, onSwipeUp, onSwipeDown, onSwipeLeft, onSwipeRight 
 }) => {
-  const { grid, boardOffset, activePiece, fallingBlocks, floatingTexts, timeLeft } = state;
+  const { grid, boardOffset, activePiece, fallingBlocks, floatingTexts, timeLeft, goalMarks } = state;
   const [highlightedGroupId, setHighlightedGroupId] = useState<string | null>(null);
   const [shakingGroupId, setShakingGroupId] = useState<string | null>(null);
+
+  const palette = useMemo(() => getPaletteForRank(rank), [rank]);
 
   // --- PRESSURE CALCULATION ---
   const pressureRatio = useMemo(() => {
@@ -71,12 +74,12 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   const waterHeightPx = waterHeightBlocks * BLOCK_SIZE;
   const waterTopY = vbH - waterHeightPx;
 
-  const getScreenX = (visX: number) => {
+  const getScreenX = useCallback((visX: number) => {
       const centerCol = VISIBLE_WIDTH / 2;
       const offsetFromCenter = visX - centerCol;
       const angle = offsetFromCenter * ANGLE_PER_COL;
       return CYL_RADIUS * Math.sin(angle);
-  };
+  }, [ANGLE_PER_COL, CYL_RADIUS]);
 
   const getGridXFromScreen = (screenX: number) => {
       const sinVal = Math.max(-1, Math.min(1, screenX / CYL_RADIUS));
@@ -84,6 +87,24 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       const offsetFromCenter = angle / ANGLE_PER_COL;
       return (VISIBLE_WIDTH / 2) + offsetFromCenter;
   };
+
+  // --- Coordinate Helper ---
+  // Returns screen % coordinates (0-100) relative to the container for a specific grid slot
+  const getScreenPercentCoords = useCallback((gridX: number, gridY: number) => {
+      let visX = gridX - boardOffset;
+      // Normalize visX to be within standard range if possible
+      if (visX > TOTAL_WIDTH / 2) visX -= TOTAL_WIDTH;
+      if (visX < -TOTAL_WIDTH / 2) visX += TOTAL_WIDTH;
+      
+      const svgX = getScreenX(visX);
+      const svgY = (gridY - BUFFER_HEIGHT) * BLOCK_SIZE + (BLOCK_SIZE / 2); // Center of block
+      
+      // Convert SVG viewbox coords to Percentage
+      const pctX = ((svgX - vbX) / vbW) * 100;
+      const pctY = ((svgY - vbY) / vbH) * 100;
+      
+      return { x: pctX, y: pctY };
+  }, [boardOffset, getScreenX, vbX, vbY, vbW, vbH]);
 
   // --- Input Handling ---
   const touchStart = useRef<{x: number, y: number, time: number} | null>(null);
@@ -332,6 +353,10 @@ export const GameBoard: React.FC<GameBoardProps> = ({
         25% { transform: translateX(-3px); }
         75% { transform: translateX(3px); }
     }
+    @keyframes scaleIn {
+        from { transform: scale(0); opacity: 0; }
+        to { transform: scale(1); opacity: 1; }
+    }
     .floating-score {
         animation: floatUp 1s ease-out forwards;
         font-family: monospace;
@@ -341,6 +366,17 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     }
     .shake-anim {
         animation: shake 0.3s cubic-bezier(.36,.07,.19,.97) both;
+    }
+    .scale-in {
+        animation: scaleIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    }
+    .super-glowing-stroke {
+        filter: drop-shadow(0 0 5px white);
+        animation: superGlowStroke 1.5s infinite alternate;
+    }
+    @keyframes superGlowStroke {
+        0%, 100% { filter: drop-shadow(0 0 4px white) drop-shadow(0 0 8px white); opacity: 0.8; stroke-width: 3px; }
+        50% { filter: drop-shadow(0 0 8px white) drop-shadow(0 0 15px white); opacity: 1; stroke-width: 4px; }
     }
   `, []);
 
@@ -479,6 +515,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       return map;
   }, [grid, boardOffset, fallingBlocks, vbX, vbY, vbW, vbH]);
 
+  const activeColors = useMemo(() => new Set(goalMarks.map(m => m.color)), [goalMarks]);
+  
+  // Calculate flying orbs logic within render to stay synced with rotation
+  const flyingOrbs = goalMarks.filter(m => now - m.spawnTime < 500);
+
   return (
     <div 
         className="w-full h-full bg-slate-950 relative shadow-2xl border-x-4 border-slate-900 overflow-hidden select-none"
@@ -533,21 +574,70 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                 strokeDasharray="4 4"
             />
 
-            {/* 1. Background Grid */}
+            {/* 1. Background Grid & Goal Marks */}
             {Array.from({length: VISIBLE_HEIGHT}).map((_, yIdx) => {
                 const y = yIdx + BUFFER_HEIGHT;
                 return Array.from({length: VISIBLE_WIDTH}).map((_, visX) => {
                     const startX = getScreenX(visX);
                     const width = getScreenX(visX+1) - startX;
                     const yPos = yIdx * BLOCK_SIZE;
+                    const centerX = startX + width / 2;
+                    const centerY = yPos + BLOCK_SIZE / 2;
+
+                    const gridX = normalizeX(visX + boardOffset);
+                    const mark = goalMarks.find(m => m.x === gridX && m.y === y);
+
                     return (
-                        <g key={`bg-${y}-${visX}`} opacity={0.2}>
-                            <line x1={startX} y1={yPos} x2={startX+width} y2={yPos} stroke={COLORS.GRID_EMPTY} strokeWidth="1" />
-                            <line x1={startX} y1={yPos} x2={startX} y2={yPos+BLOCK_SIZE} stroke={COLORS.GRID_EMPTY} strokeWidth="1" />
-                            <circle cx={startX} cy={yPos} r={1} fill={COLORS.GRID_EMPTY} />
+                        <g key={`bg-${y}-${visX}`}>
+                            <line x1={startX} y1={yPos} x2={startX+width} y2={yPos} stroke={COLORS.GRID_EMPTY} strokeWidth="1" opacity={0.2} />
+                            <line x1={startX} y1={yPos} x2={startX} y2={yPos+BLOCK_SIZE} stroke={COLORS.GRID_EMPTY} strokeWidth="1" opacity={0.2} />
+                            
+                            {/* GOAL MARK RENDER */}
+                            {mark && now - mark.spawnTime >= 500 && (
+                                <g>
+                                    <circle 
+                                        cx={centerX} 
+                                        cy={centerY} 
+                                        r={BLOCK_SIZE / 4} 
+                                        fill={mark.color} 
+                                        stroke="white"
+                                        strokeWidth="1"
+                                        strokeOpacity={0.5}
+                                    />
+                                </g>
+                            )}
                         </g>
                     );
                 });
+            })}
+
+            {/* 1b. Offscreen Goal Indicators */}
+            {goalMarks.map(mark => {
+                const centerCol = normalizeX(boardOffset + VISIBLE_WIDTH / 2);
+                let diff = mark.x - centerCol;
+                if (diff > TOTAL_WIDTH / 2) diff -= TOTAL_WIDTH;
+                if (diff < -TOTAL_WIDTH / 2) diff += TOTAL_WIDTH;
+                
+                if (Math.abs(diff) > VISIBLE_WIDTH / 2) {
+                    const isRight = diff > 0;
+                    const yPos = (mark.y - BUFFER_HEIGHT) * BLOCK_SIZE + (BLOCK_SIZE / 2);
+                    const xPos = isRight ? (vbX + vbW - 5) : (vbX + 5);
+                    
+                    return (
+                        <g key={`off-${mark.id}`} opacity={0.7}>
+                             <path 
+                                d={isRight 
+                                    ? `M ${xPos} ${yPos - 10} L ${xPos + 10} ${yPos} L ${xPos} ${yPos + 10} Z`
+                                    : `M ${xPos} ${yPos - 10} L ${xPos - 10} ${yPos} L ${xPos} ${yPos + 10} Z`
+                                }
+                                fill={mark.color}
+                                stroke="white"
+                                strokeWidth="1"
+                             />
+                        </g>
+                    );
+                }
+                return null;
             })}
 
             {/* 2. Groups (Static & Falling) */}
@@ -557,8 +647,8 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                 const color = sample.color;
                 const isHighlighted = gid === highlightedGroupId;
                 const isShaking = gid === shakingGroupId;
+                const isGlowing = cells.some(c => c.cell.isGlowing);
 
-                // Calculate bounding box for the mask-rect
                 let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
                 cells.forEach(c => {
                     minX = Math.min(minX, c.screenX);
@@ -569,15 +659,12 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
                 return (
                     <g key={`group-${gid}`} className={isShaking ? "shake-anim" : ""}>
-                        {/* A. Unified Shell */}
                         <rect 
                             x={minX} y={minY} width={maxX - minX} height={maxY - minY}
                             fill={color}
                             fillOpacity={0.2}
                             mask={`url(#mask-${gid})`}
                         />
-
-                        {/* B. Liquid Fills - Rendered as solid shapes inside a Group with opacity */}
                         <g opacity={0.9} mask={`url(#mask-${gid})`}>
                             {cells.map((c, i) => {
                                 if (!c.cell || c.isFalling) {
@@ -586,13 +673,12 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                                             key={`liq-${c.cell.id}`}
                                             x={c.screenX - 0.5} 
                                             y={c.screenY}
-                                            width={c.width + 1} // Overlap
+                                            width={c.width + 1} 
                                             height={BLOCK_SIZE}
                                             fill={color}
                                         />
                                     );
                                 }
-
                                 const totalDuration = c.cell.groupSize * PER_BLOCK_DURATION;
                                 const groupHeight = (c.cell.groupMaxY - c.cell.groupMinY + 1);
                                 const timePerRow = totalDuration / Math.max(1, groupHeight);
@@ -617,7 +703,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                             })}
                         </g>
 
-                        {/* Highlight Overlay if Pressed */}
                         {isHighlighted && (
                             <rect 
                                 x={minX} y={minY} width={maxX - minX} height={maxY - minY}
@@ -627,20 +712,18 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                             />
                         )}
 
-                        {/* C. Contours (Glow) */}
                         {cells.map((c, i) => (
                              <path 
                                 key={`cnt-${c.cell.id}`}
                                 d={getContourPath(c.screenX, c.screenY, c.width, BLOCK_SIZE, c.neighbors)}
                                 fill="none"
-                                stroke={color}
-                                strokeWidth="2"
-                                className="glow-stroke"
-                                style={{ color: color }}
+                                stroke={isGlowing ? "white" : color}
+                                strokeWidth={isGlowing ? "3" : "2"}
+                                className={isGlowing ? "super-glowing-stroke" : "glow-stroke"}
+                                style={{ color: isGlowing ? 'white' : color }}
                              />
                         ))}
 
-                         {/* D. Highlights */}
                          {cells.map((c, i) => {
                              const hPath = getHighlightPath(c.screenX, c.screenY, c.width, c.neighbors);
                              if (!hPath) return null;
@@ -824,6 +907,78 @@ export const GameBoard: React.FC<GameBoardProps> = ({
             })}
 
         </svg>
+
+        {/* Flying Orbs Overlay */}
+        {flyingOrbs.map(orb => {
+            const elapsed = now - orb.spawnTime;
+            const progress = Math.min(1, elapsed / 500);
+            
+            // Ease Out Quad
+            const eased = 1 - (1 - progress) * (1 - progress);
+
+            // Determine Start Position based on Palette Index
+            const colorIndex = palette.indexOf(orb.color);
+            // Compact spacing logic (gap-2 + w-5 = 28px approx = ~8%)
+            const startX = 50 + ((colorIndex - (palette.length - 1) / 2) * 8); 
+            const startY = 6; // 6% down (Approx Top area location of new bubble)
+
+            // Determine End Position (Board)
+            const endCoords = getScreenPercentCoords(orb.x, orb.y);
+            
+            // Interpolate
+            const currentX = startX + (endCoords.x - startX) * eased;
+            const currentY = startY + (endCoords.y - startY) * eased;
+
+            return (
+                <div 
+                    key={`fly-${orb.id}`}
+                    className="absolute w-4 h-4 rounded-full shadow-lg border border-white/50 z-30"
+                    style={{
+                        backgroundColor: orb.color,
+                        left: `${currentX}%`,
+                        top: `${currentY}%`,
+                        transform: 'translate(-50%, -50%)',
+                        boxShadow: `0 0 10px ${orb.color}`
+                    }}
+                />
+            );
+        })}
+
+        {/* Top Pool UI - Combined with Goal Counter */}
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-4 p-2 pl-4 bg-slate-900/80 rounded-full border border-slate-700/50 backdrop-blur-md z-20 pointer-events-none shadow-lg">
+            {/* Goal Counter */}
+            <span className="text-lg font-mono font-black text-yellow-400 leading-none drop-shadow-md">
+                {state.goalsCleared}/{state.goalsTarget}
+            </span>
+            
+            {/* Separator */}
+            <div className="w-px h-6 bg-slate-700/50" />
+
+            {/* Palette */}
+            <div className="flex items-center gap-2">
+                {palette.map(color => {
+                    const isActive = activeColors.has(color);
+                    return (
+                        <div 
+                            key={color}
+                            className="w-5 h-5 rounded-full border-2 border-slate-700/50 relative flex items-center justify-center transition-all duration-300"
+                            style={{ borderColor: isActive ? 'transparent' : color }}
+                        >
+                            {/* The "Available" Dot */}
+                            <div 
+                                className={`w-2.5 h-2.5 rounded-full transition-all duration-300 ${isActive ? 'scale-0 opacity-0' : 'scale-100 opacity-100'}`}
+                                style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}` }}
+                            />
+                            
+                            {/* Placeholder Slot when active */}
+                            {isActive && (
+                                <div className="w-1 h-1 rounded-full bg-slate-800" />
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
     </div>
   );
 };

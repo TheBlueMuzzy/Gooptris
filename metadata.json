@@ -1,5 +1,5 @@
 {
-  "name": "Gooptris",
+  "name": "Goops",
   "description": "A puzzle game where you manage a filtration system clogged by falling goop. Rotate the cylinder to match blobs and purge them.",
   "requestFramePermissions": []
 }
