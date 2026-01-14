@@ -300,7 +300,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
   }, []);
 
   const hardDrop = useCallback(() => {
-    const { gameOver, isPaused, activePiece, countdown, grid, boardOffset, goalMarks, goalsCleared, goalsTarget, timeLeft, score } = stateRef.current;
+    const { gameOver, isPaused, activePiece, countdown, grid, boardOffset, goalMarks } = stateRef.current;
     if (gameOver || isPaused || !activePiece || countdown !== null) return;
 
     const y = getGhostY(grid, activePiece, boardOffset);
@@ -309,52 +309,25 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
     // Check for goal consumption during merge
     const { grid: newGrid, consumedGoals, destroyedGoals } = mergePiece(grid, droppedPiece, goalMarks);
     
-    // Handle Goals
+    // Handle Goals Capture (Just capture, don't clear yet)
     if (consumedGoals.length > 0 || destroyedGoals.length > 0) {
         const goalsToRemove = [...consumedGoals, ...destroyedGoals];
-        let newGoalMarks = goalMarks.filter(g => !goalsToRemove.includes(g.id));
+        const newGoalMarks = goalMarks.filter(g => !goalsToRemove.includes(g.id));
         
-        const newCleared = goalsCleared + consumedGoals.length;
-        const currentRank = calculateRankDetails(initialTotalScoreRef.current + score).rank;
-
-        // If target reached for the FIRST time
-        if (newCleared >= goalsTarget && goalsCleared < goalsTarget) {
-             const pressureRatio = Math.max(0, 1 - (timeLeft / maxTimeRef.current));
-             if (pressureRatio < 0.9) {
-                 const burst = spawnGoalBurst(newGrid, newGoalMarks, currentRank, timeLeft, maxTimeRef.current);
-                 newGoalMarks = [...newGoalMarks, ...burst];
-                 audio.playPop(10); 
-             } else {
-                 newGoalMarks = [];
-             }
-        } else if (newCleared >= goalsTarget) {
-            // Already met target previously, keep the burst markers but do nothing new
-            // Unless we want to clear them? 
-            // Stick to "stop spawning" logic which is implicit.
-            // If pressure spikes > 90%, maybe clear? 
-            const pressureRatio = Math.max(0, 1 - (timeLeft / maxTimeRef.current));
-            if (pressureRatio >= 0.9) {
-                newGoalMarks = [];
-            }
-        }
-
         setGoalMarks(newGoalMarks);
-        setGoalsCleared(newCleared);
-        stateRef.current.goalsCleared = newCleared;
         stateRef.current.goalMarks = newGoalMarks;
 
-        // Visual Feedback for Consumed
+        // Visual Feedback for Captured
         consumedGoals.forEach(id => {
             const cx = normalizeX(droppedPiece.x); 
             const cy = Math.floor(droppedPiece.y);
             const textId = Math.random().toString(36).substr(2, 9);
             setFloatingTexts(prev => [...prev, {
-                id: textId, text: 'GOAL!', x: cx, y: cy, life: 1, color: '#facc15'
+                id: textId, text: 'CAPTURED!', x: cx, y: cy, life: 1, color: '#facc15'
             }]);
             audio.playPop(5); 
         });
-        
-        // Visual Feedback for Destroyed (Optional, maybe a break sound?)
+
         destroyedGoals.forEach(id => {
             audio.playReject();
         });
@@ -489,12 +462,24 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
             tierPressureReduc = tier * PRESSURE_TIER_BONUS_MS;
         }
 
-        // Infused Cell Bonus
+        // GOAL CLEAR LOGIC (Infused Cells)
         let infusedCount = 0;
         group.forEach(pt => {
             if (grid[pt.y][pt.x]?.isGlowing) infusedCount++;
         });
         const infusedBonus = infusedCount * 3000; // 3 seconds per infused cell
+
+        // Update Goals Cleared State if we popped infused blocks
+        const { goalsCleared, goalsTarget, score, goalMarks } = stateRef.current;
+        let newCleared = goalsCleared;
+        let burstTriggered = false;
+
+        if (infusedCount > 0) {
+             newCleared += infusedCount;
+             setGoalsCleared(newCleared);
+             stateRef.current.goalsCleared = newCleared;
+             audio.playPop(10); // Celebration pop
+        }
 
         const totalTimeAdded = basePressureReduc + unitPressureReduc + tierPressureReduc + infusedBonus;
 
@@ -533,8 +518,8 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
             { id: textId + '_time', text: `-${(totalTimeAdded/1000).toFixed(1)}s`, x: x, y: y - 1, life: 1, color: '#4ade80' }
         ];
         
-        if (infusedBonus > 0) {
-             floaters.push({ id: textId + '_bonus', text: 'INFUSED!', x: x, y: y - 2, life: 1, color: '#fff' });
+        if (infusedCount > 0) {
+             floaters.push({ id: textId + '_bonus', text: 'GOAL CLEARED!', x: x, y: y - 2, life: 1.5, color: '#fff' });
         }
 
         setFloatingTexts(prev => [...prev, ...floaters]);
@@ -552,6 +537,35 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
         
         const colsToCheck = Array.from(uniqueCols);
         const { grid: cleanGrid, falling: newFalling } = getFloatingBlocks(tempGrid, colsToCheck);
+
+        // Burst Logic / Goal Management Post-Pop
+        // We use cleanGrid so we can spawn bursts in the newly freed space
+        if (infusedCount > 0) {
+            // Burst if target just met
+            if (newCleared >= goalsTarget && goalsCleared < goalsTarget) {
+                 const pressureRatio = Math.max(0, 1 - (timeLeft / maxTimeRef.current));
+                 const currentRank = calculateRankDetails(initialTotalScoreRef.current + score).rank;
+
+                 if (pressureRatio < 0.9) {
+                     const burst = spawnGoalBurst(cleanGrid, goalMarks, currentRank, timeLeft, maxTimeRef.current);
+                     const updatedMarks = [...goalMarks, ...burst];
+                     setGoalMarks(updatedMarks);
+                     stateRef.current.goalMarks = updatedMarks;
+                     audio.playPop(10); 
+                 } else {
+                     setGoalMarks([]);
+                     stateRef.current.goalMarks = [];
+                 }
+            } 
+            // If already met target, check pressure to possibly clear goals
+            else if (newCleared >= goalsTarget) {
+                 const pressureRatio = Math.max(0, 1 - (timeLeft / maxTimeRef.current));
+                 if (pressureRatio >= 0.9) {
+                     setGoalMarks([]);
+                     stateRef.current.goalMarks = [];
+                 }
+            }
+        }
 
         setGrid(cleanGrid);
         stateRef.current.grid = cleanGrid; // Manual Sync
@@ -679,34 +693,15 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
                 // Check Goals Consumption during merge
                 const { grid: newGrid, consumedGoals, destroyedGoals } = mergePiece(freshState.grid, finalPiece, freshState.goalMarks);
                 
-                // Handle Goals
+                // Handle Goals Capture
                 if (consumedGoals.length > 0 || destroyedGoals.length > 0) {
                     const goalsToRemove = [...consumedGoals, ...destroyedGoals];
                     let newGoalMarks = freshState.goalMarks.filter(g => !goalsToRemove.includes(g.id));
                     
-                    const newCleared = freshState.goalsCleared + consumedGoals.length;
-                    const currentRank = calculateRankDetails(initialTotalScoreRef.current + freshState.score).rank;
-
-                    // Burst Logic
-                    if (newCleared >= freshState.goalsTarget && freshState.goalsCleared < freshState.goalsTarget) {
-                        const pressureRatio = Math.max(0, 1 - (freshState.timeLeft / maxTimeRef.current));
-                        if (pressureRatio < 0.9) {
-                            const burst = spawnGoalBurst(newGrid, newGoalMarks, currentRank, freshState.timeLeft, maxTimeRef.current);
-                            newGoalMarks = [...newGoalMarks, ...burst];
-                            audio.playPop(10);
-                        } else {
-                            newGoalMarks = [];
-                        }
-                    } else if (newCleared >= freshState.goalsTarget) {
-                        const pressureRatio = Math.max(0, 1 - (freshState.timeLeft / maxTimeRef.current));
-                        if (pressureRatio >= 0.9) {
-                            newGoalMarks = [];
-                        }
-                    }
+                    // Note: We DO NOT increment goalsCleared here anymore. 
+                    // That happens in handleBlockTap when the captured goal is popped.
 
                     setGoalMarks(newGoalMarks);
-                    setGoalsCleared(newCleared);
-                    stateRef.current.goalsCleared = newCleared;
                     stateRef.current.goalMarks = newGoalMarks;
 
                     // Visual Feedback
@@ -715,7 +710,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
                         const cy = Math.floor(finalPiece.y);
                         const textId = Math.random().toString(36).substr(2, 9);
                         setFloatingTexts(prev => [...prev, {
-                            id: textId, text: 'GOAL!', x: cx, y: cy, life: 1, color: '#facc15'
+                            id: textId, text: 'CAPTURED!', x: cx, y: cy, life: 1, color: '#facc15'
                         }]);
                         audio.playPop(5); 
                     });
