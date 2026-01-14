@@ -72,7 +72,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onPlay, onUpgrades, onSettin
                 className="text-7xl md:text-9xl text-transparent bg-clip-text bg-gradient-to-b from-green-400 via-green-500 to-green-800 filter drop-shadow-[0_0_25px_rgba(34,197,94,0.6)] text-center pb-4"
                 style={{ fontFamily: '"Chewy", cursive' }}
             >
-            GOOPTRIS
+            GOOPS
             </h1>
             <div className="text-center text-green-500/60 font-mono tracking-[0.5em] text-sm mt-2 uppercase">Filtration Defense</div>
         </div>

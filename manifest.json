@@ -1,6 +1,7 @@
+
 {
-  "short_name": "Gooptris",
-  "name": "Gooptris: Filtration Defense",
+  "short_name": "Goops",
+  "name": "Goops: Filtration Defense",
   "icons": [
     {
       "src": "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/droplets.svg",
