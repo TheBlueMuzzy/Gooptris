@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { GameState, GridCell, ActivePiece, PieceDefinition, PieceType, FallingBlock, ScoreBreakdown, GameStats, FloatingText } from './types';
+import { GameState, GridCell, ActivePiece, PieceDefinition, PieceType, FallingBlock, ScoreBreakdown, GameStats, FloatingText, GoalMark } from './types';
 import { 
     TOTAL_WIDTH, TOTAL_HEIGHT, VISIBLE_WIDTH, VISIBLE_HEIGHT, PER_BLOCK_DURATION, INITIAL_TIME_MS, 
     PRESSURE_RECOVERY_BASE_MS, PRESSURE_RECOVERY_PER_UNIT_MS, PRESSURE_TIER_THRESHOLD, PRESSURE_TIER_STEP, PRESSURE_TIER_BONUS_MS, UPGRADE_CONFIG
@@ -8,7 +8,8 @@ import {
 import { 
     spawnPiece, checkCollision, mergePiece, getRotatedCells, normalizeX, findContiguousGroup, 
     updateGroups, getGhostY, updateFallingBlocks, getFloatingBlocks,
-    calculateHeightBonus, calculateOffScreenBonus, calculateMultiplier, calculateAdjacencyBonus, createInitialGrid
+    calculateHeightBonus, calculateOffScreenBonus, calculateMultiplier, calculateAdjacencyBonus, createInitialGrid,
+    spawnGoalMark, getPaletteForRank
 } from './utils/gameLogic';
 import { calculateRankDetails } from './utils/progression';
 import { GameBoard } from './components/GameBoard';
@@ -20,6 +21,7 @@ const INITIAL_SPEED = 800; // ms per block
 const MIN_SPEED = 100;
 const SOFT_DROP_FACTOR = 20; // 20x speed when soft dropping
 const LOCK_DELAY_MS = 500; // Time to slide before locking
+const GOAL_SPAWN_INTERVAL = 5000;
 
 interface GameProps {
   onExit: () => void;
@@ -52,6 +54,11 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
   const [timeLeft, setTimeLeft] = useState(INITIAL_TIME_MS);
   const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
   
+  // Goal System
+  const [goalMarks, setGoalMarks] = useState<GoalMark[]>([]);
+  const [goalsCleared, setGoalsCleared] = useState(0);
+  const [goalsTarget, setGoalsTarget] = useState(5); // Default, updated on start
+
   const maxTimeRef = useRef(INITIAL_TIME_MS);
 
   // Statistics
@@ -64,6 +71,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
   const isPausedRef = useRef(false);
   const lockStartTimeRef = useRef<number | null>(null);
   const requestRef = useRef<number>(0);
+  const lastGoalSpawnTimeRef = useRef<number>(0);
   
   const initialTotalScoreRef = useRef(initialTotalScore);
   const latestTotalScorePropRef = useRef(initialTotalScore);
@@ -79,13 +87,13 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
   // Ref to hold latest state for the animation loop
   const stateRef = useRef({ 
       activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown, floatingTexts, score,
-      canSwap, storedPiece, combo
+      canSwap, storedPiece, combo, goalMarks, goalsCleared, goalsTarget
   });
 
   useEffect(() => {
     stateRef.current = { 
         activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown, floatingTexts, score,
-        canSwap, storedPiece, combo
+        canSwap, storedPiece, combo, goalMarks, goalsCleared, goalsTarget
     };
     gameOverRef.current = gameOver;
     isPausedRef.current = isPaused;
@@ -93,7 +101,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
     // Audio: Update pressure
     const pressure = Math.max(0, 1 - (timeLeft / maxTimeRef.current));
     audio.setPressure(pressure);
-  }, [activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown, floatingTexts, score, canSwap, storedPiece, combo]);
+  }, [activePiece, grid, boardOffset, gameOver, isPaused, gameSpeed, isSoftDropping, fallingBlocks, timeLeft, countdown, floatingTexts, score, canSwap, storedPiece, combo, goalMarks, goalsCleared, goalsTarget]);
 
   useEffect(() => {
     startNewGame();
@@ -104,7 +112,12 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
     if (gameOver) {
         audio.playGameOver();
         audio.stopMusic();
-        onRunComplete(score);
+        
+        // If Win (Goal Reached), provide bonus
+        const isWin = goalsCleared >= goalsTarget;
+        const finalScore = score + (isWin ? 5000 * calculateRankDetails(initialTotalScoreRef.current).rank : 0);
+        
+        onRunComplete(finalScore);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameOver]);
@@ -138,6 +151,12 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
     const newInitialSpeed = INITIAL_SPEED * (1 + stabilityMod); 
 
     const startRank = calculateRankDetails(initialTotalScoreRef.current).rank;
+    const palette = getPaletteForRank(startRank);
+    const newTarget = palette.length + startRank; // Win Condition
+    setGoalsTarget(newTarget);
+    setGoalsCleared(0);
+    setGoalMarks([]);
+
     const newGrid = createInitialGrid(startRank);
     const newOffset = 0;
 
@@ -162,6 +181,7 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
     setTimeLeft(newMaxTime);
     setFloatingTexts([]);
     lockStartTimeRef.current = null;
+    lastGoalSpawnTimeRef.current = Date.now();
     
     setScoreBreakdown({ base: 0, height: 0, offscreen: 0, adjacency: 0, speed: 0 });
     setGameStats({ startTime: 0, totalBonusTime: 0, maxGroupSize: 0 });
@@ -277,12 +297,45 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
   }, []);
 
   const hardDrop = useCallback(() => {
-    const { gameOver, isPaused, activePiece, countdown, grid, boardOffset } = stateRef.current;
+    const { gameOver, isPaused, activePiece, countdown, grid, boardOffset, goalMarks, goalsCleared, goalsTarget } = stateRef.current;
     if (gameOver || isPaused || !activePiece || countdown !== null) return;
 
     const y = getGhostY(grid, activePiece, boardOffset);
     const droppedPiece = { ...activePiece, y };
-    const newGrid = mergePiece(grid, droppedPiece);
+    
+    // Check for goal consumption during merge
+    const { grid: newGrid, consumedGoals } = mergePiece(grid, droppedPiece, goalMarks);
+    
+    // Handle Consumed Goals
+    if (consumedGoals.length > 0) {
+        const newGoalMarks = goalMarks.filter(g => !consumedGoals.includes(g.id));
+        setGoalMarks(newGoalMarks);
+        
+        const newCleared = goalsCleared + consumedGoals.length;
+        setGoalsCleared(newCleared);
+        stateRef.current.goalsCleared = newCleared;
+        stateRef.current.goalMarks = newGoalMarks;
+
+        // Visual Feedback
+        consumedGoals.forEach(id => {
+            // Find rough location for floating text (using piece center)
+            const cx = normalizeX(droppedPiece.x); 
+            const cy = Math.floor(droppedPiece.y);
+            const textId = Math.random().toString(36).substr(2, 9);
+            setFloatingTexts(prev => [...prev, {
+                id: textId, text: 'GOAL!', x: cx, y: cy, life: 1, color: '#facc15'
+            }]);
+            audio.playPop(5); // High pitch pop
+        });
+
+        // Check Win
+        if (newCleared >= goalsTarget) {
+            setGameOver(true);
+            gameOverRef.current = true;
+            return;
+        }
+    }
+
     const distance = Math.floor(y - activePiece.y);
     updateScoreAndStats(distance * 2, { speed: distance * 2 });
 
@@ -508,10 +561,27 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
     }
 
     // RE-READ STATE for Gravity Logic
-    // This is the fix for the "Piece drifts left" bug. 
-    // moveBoard may have updated activePiece.x in stateRef.current.
-    // We must use that updated X for the gravity Y update.
     const freshState = stateRef.current;
+
+    // 0.5 Goal Mark Spawning
+    if (now - lastGoalSpawnTimeRef.current > GOAL_SPAWN_INTERVAL) {
+        const currentRank = calculateRankDetails(initialTotalScoreRef.current + freshState.score).rank;
+        const newGoal = spawnGoalMark(
+            freshState.grid, 
+            freshState.goalMarks, 
+            currentRank, 
+            freshState.timeLeft, 
+            maxTimeRef.current
+        );
+
+        if (newGoal) {
+            const updatedMarks = [...freshState.goalMarks, newGoal];
+            setGoalMarks(updatedMarks);
+            stateRef.current.goalMarks = updatedMarks;
+            audio.playPop(1); // Small blip
+        }
+        lastGoalSpawnTimeRef.current = now;
+    }
 
     // 1. Update Timer
     setTimeLeft(prev => Math.max(0, prev - dt));
@@ -571,7 +641,39 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
                 const y = getGhostY(freshState.grid, freshState.activePiece, freshState.boardOffset);
                 const finalPiece = { ...freshState.activePiece, y };
                 
-                const newGrid = mergePiece(freshState.grid, finalPiece);
+                // Check Goals Consumption during merge
+                const { grid: newGrid, consumedGoals } = mergePiece(freshState.grid, finalPiece, freshState.goalMarks);
+                
+                // Handle Consumed Goals
+                if (consumedGoals.length > 0) {
+                    const newGoalMarks = freshState.goalMarks.filter(g => !consumedGoals.includes(g.id));
+                    setGoalMarks(newGoalMarks);
+                    
+                    const newCleared = freshState.goalsCleared + consumedGoals.length;
+                    setGoalsCleared(newCleared);
+                    stateRef.current.goalsCleared = newCleared;
+                    stateRef.current.goalMarks = newGoalMarks;
+
+                    // Visual Feedback
+                    consumedGoals.forEach(id => {
+                        const cx = normalizeX(finalPiece.x);
+                        const cy = Math.floor(finalPiece.y);
+                        const textId = Math.random().toString(36).substr(2, 9);
+                        setFloatingTexts(prev => [...prev, {
+                            id: textId, text: 'GOAL!', x: cx, y: cy, life: 1, color: '#facc15'
+                        }]);
+                        audio.playPop(5); 
+                    });
+
+                     // Check Win
+                    if (newCleared >= freshState.goalsTarget) {
+                        setGameOver(true);
+                        gameOverRef.current = true;
+                        // Don't return, let it render one frame so visuals update? 
+                        // Actually return to stop loop is fine
+                    }
+                }
+
                 audio.playDrop(); 
 
                 setGrid(newGrid);
@@ -666,7 +768,8 @@ const Game: React.FC<GameProps> = ({ onExit, onRunComplete, initialTotalScore, p
 
   const gameState: GameState = {
       grid, boardOffset, activePiece, storedPiece, score, gameOver, isPaused, canSwap,
-      level: 1, cellsCleared, combo, fallingBlocks, timeLeft, scoreBreakdown, gameStats, floatingTexts
+      level: 1, cellsCleared, combo, fallingBlocks, timeLeft, scoreBreakdown, gameStats, floatingTexts,
+      goalMarks, goalsCleared, goalsTarget
   };
 
   const animStyle = useMemo(() => `

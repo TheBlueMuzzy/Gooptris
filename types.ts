@@ -38,6 +38,7 @@ export interface BlockData {
   groupMinY: number; // Top-most Y (smallest value) of the group
   groupMaxY: number; // Bottom-most Y (largest value) of the group
   groupSize: number; // Number of blocks in this group
+  isGlowing?: boolean; // Visual effect for blocks that consumed a goal
 }
 
 export type GridCell = BlockData | null;
@@ -72,6 +73,14 @@ export interface FloatingText {
     color?: string;
 }
 
+export interface GoalMark {
+  id: string;
+  x: number;
+  y: number;
+  color: string;
+  spawnTime: number;
+}
+
 export interface GameState {
   grid: GridCell[][]; // [y][x]
   boardOffset: number; // 0-TOTAL_WIDTH
@@ -93,6 +102,11 @@ export interface GameState {
   
   // Visuals
   floatingTexts: FloatingText[];
+  
+  // Goal System
+  goalMarks: GoalMark[];
+  goalsCleared: number;
+  goalsTarget: number;
 }
 
 // --- Meta Progression Types ---

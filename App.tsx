@@ -4,11 +4,13 @@ import Game from './Game';
 import { MainMenu } from './components/MainMenu';
 import { Upgrades } from './components/Upgrades';
 import { Settings } from './components/Settings';
+import { HowToPlay } from './components/HowToPlay';
 import { SaveData } from './types';
 import { loadSaveData, saveGameData, wipeSaveData } from './utils/storage';
 import { calculateRankDetails } from './utils/progression';
+import { audio } from './utils/audio';
 
-type ViewState = 'MENU' | 'GAME' | 'UPGRADES' | 'SETTINGS';
+type ViewState = 'MENU' | 'GAME' | 'UPGRADES' | 'SETTINGS' | 'HOW_TO_PLAY';
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('MENU');
@@ -56,6 +58,11 @@ const App: React.FC = () => {
       setSaveData(freshData);
   };
 
+  const handleUpdateSettings = (newSettings: SaveData['settings']) => {
+    setSaveData(prev => ({ ...prev, settings: newSettings }));
+    audio.updateSettings(newSettings);
+  };
+
   return (
     <div className="w-full h-screen bg-slate-950 text-slate-200 font-sans overflow-hidden">
       {view === 'MENU' && (
@@ -63,6 +70,7 @@ const App: React.FC = () => {
           onPlay={() => setView('GAME')} 
           onUpgrades={() => setView('UPGRADES')} 
           onSettings={() => setView('SETTINGS')}
+          onHowToPlay={() => setView('HOW_TO_PLAY')}
           saveData={saveData}
           onWipeSave={handleWipeSave}
         />
@@ -73,6 +81,7 @@ const App: React.FC = () => {
           onExit={() => setView('MENU')} 
           onRunComplete={handleRunComplete} 
           initialTotalScore={saveData.totalScore}
+          powerUps={saveData.powerUps}
         />
       )}
 
@@ -81,7 +90,15 @@ const App: React.FC = () => {
       )}
 
       {view === 'SETTINGS' && (
-        <Settings onBack={() => setView('MENU')} />
+        <Settings 
+          settings={saveData.settings} 
+          onUpdate={handleUpdateSettings}
+          onBack={() => setView('MENU')} 
+        />
+      )}
+
+      {view === 'HOW_TO_PLAY' && (
+        <HowToPlay onBack={() => setView('MENU')} />
       )}
     </div>
   );
